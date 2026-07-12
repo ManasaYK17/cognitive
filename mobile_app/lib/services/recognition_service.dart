@@ -1,0 +1,80 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:camera/camera.dart';
+import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
+import '../services/api_client.dart';
+
+class RecognitionService extends ChangeNotifier {
+  String? sessionToken;
+  int? patientId;
+  Map<String, dynamic>? recognizedPerson;
+
+  Future<bool> performRecognition() async {
+    if (kIsWeb) {
+      return false;
+    }
+    final cameraPermission = await Permission.camera.request();
+    if (!cameraPermission.isGranted) {
+      return false;
+    }
+
+    final imagePath = await _captureImage();
+    if (imagePath == null) {
+      return false;
+    }
+
+    final result = await attemptRecognition(imagePath, 'phone_camera');
+    if (result != null) {
+      sessionToken = result['session_token'] as String?;
+      patientId = result['patient_id'] as int?;
+      recognizedPerson = result;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  Future<String?> _captureImage() async {
+    try {
+      if (kIsWeb) {
+        return null;
+      }
+      final cameraPermission = await Permission.camera.request();
+      if (!cameraPermission.isGranted) {
+        return null;
+      }
+
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        return null;
+      }
+
+      final controller = CameraController(cameras.first, ResolutionPreset.medium);
+      await controller.initialize();
+      final image = await controller.takePicture();
+      await controller.dispose();
+      return image.path;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> attemptRecognition(String imagePath, String source) async {
+    try {
+      final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-known-person/');
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['source'] = source;
+      request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode != 200) {
+        return null;
+      }
+      final payload = json.decode(response.body) as Map<String, dynamic>;
+      return payload;
+    } catch (_) {
+      return null;
+    }
+  }
+}

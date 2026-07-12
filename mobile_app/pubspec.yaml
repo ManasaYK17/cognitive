@@ -1,0 +1,28 @@
+name: cognitive_assist_app
+description: A caregiver mobile app for the Cognitive Assist system.
+publish_to: 'none'
+version: 0.1.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.5
+  http: ^1.0.0
+  provider: ^6.0.5
+  camera: ^0.10.0
+  image_picker: ^0.8.7+4
+  google_maps_flutter: ^2.4.0
+  firebase_core: ^4.11.0
+  firebase_messaging: ^16.4.1
+  flutter_local_notifications: ^19.4.2
+  flutter_tts: ^3.5.0
+  geolocator: ^10.0.0
+  permission_handler: ^10.4.0
+  record: ^5.0.4
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.1
+flutter:
+  uses-material-design: true
