@@ -43,10 +43,15 @@ class PatientTests(APITestCase):
         self.assertEqual(delete_response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Patient.objects.filter(id=patient_id).exists())
 
-    def test_patient_face_images_upload(self):
+    def test_patient_face_images_upload_replaces_previous_patient_reference(self):
         patient = Patient.objects.create(caregiver=self.caregiver, name='Bob', age=78, medical_notes='Test')
         upload_url = reverse('patient-face-images', kwargs={'pk': patient.id})
-        image = SimpleUploadedFile('face1.jpg', b'fake-image-bytes', content_type='image/jpeg')
-        response = self.client.post(upload_url, {'files': [image, image]}, format='multipart')
+        image_one = SimpleUploadedFile('face1.jpg', b'fake-image-bytes', content_type='image/jpeg')
+        response = self.client.post(upload_url, {'files': [image_one]}, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(FaceImage.objects.filter(patient_subject=patient).count(), 2)
+        self.assertEqual(FaceImage.objects.filter(patient_subject=patient).count(), 1)
+
+        image_two = SimpleUploadedFile('face2.jpg', b'fake-image-bytes-2', content_type='image/jpeg')
+        replacement_response = self.client.post(upload_url, {'files': [image_two]}, format='multipart')
+        self.assertEqual(replacement_response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(FaceImage.objects.filter(patient_subject=patient).count(), 1)

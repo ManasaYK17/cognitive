@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/recognition_service.dart';
+import 'caregiver_dashboard_screen.dart';
 import 'caregiver_login_screen.dart';
 import 'patient_mode_screen.dart';
 
@@ -30,11 +32,15 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
-    final success = await recognitionService.performRecognition();
+
+    final result = await recognitionService.performPatientRecognition().timeout(
+      const Duration(seconds: 15),
+      onTimeout: () => null,
+    );
 
     if (!mounted) return;
 
-    if (success && recognitionService.sessionToken != null) {
+    if (result != null && result['match'] == true && recognitionService.sessionToken != null) {
       authService.setPatientSessionToken(recognitionService.sessionToken!);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const PatientModeScreen()),
@@ -43,7 +49,9 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     }
 
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const CaregiverLoginScreen()),
+      MaterialPageRoute(
+        builder: (_) => authService.accessToken != null ? const CaregiverDashboardScreen() : const CaregiverLoginScreen(),
+      ),
     );
   }
 

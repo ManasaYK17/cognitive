@@ -80,28 +80,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
   Future<void> _pickFaceImage() async {
     try {
       final picker = ImagePicker();
-      final source = await showModalBottomSheet<ImageSource>(
-        context: context,
-        builder: (_) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('Camera'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('Gallery'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (source == null) return;
-      final image = await picker.pickImage(source: source, imageQuality: 80);
+      final image = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
       if (image == null) return;
       final bytes = await image.readAsBytes();
       setState(() {
@@ -198,7 +177,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'Patient face capture is only supported through the live recognition workflow. Use the app home screen to scan the patient face.',
+                            'Capture a patient face reference here so the app can recognise the patient at sign-in and switch into patient mode.',
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black54),
                           ),
                         ],
@@ -232,7 +211,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                         ElevatedButton.icon(
                           onPressed: _pickFaceImage,
                           icon: const Icon(Icons.camera_alt),
-                          label: const Text('Scan patient face'),
+                          label: const Text('Capture patient face'),
                         ),
                         const SizedBox(height: 10),
                         if (_faceImages.isNotEmpty)

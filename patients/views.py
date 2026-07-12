@@ -57,6 +57,8 @@ class PatientFaceImageView(generics.CreateAPIView):
             return Response({'detail': 'No files provided.'}, status=status.HTTP_400_BAD_REQUEST)
         if len(files) < 1:
             return Response({'detail': 'At least one face image is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        FaceImage.objects.filter(patient_subject=patient).delete()
         created_images = []
         for image_file in files:
             face_image = FaceImage.objects.create(subject_type='patient', patient_subject=patient, image=image_file)

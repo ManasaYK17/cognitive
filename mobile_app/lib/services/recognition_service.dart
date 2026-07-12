@@ -35,6 +35,37 @@ class RecognitionService extends ChangeNotifier {
     return false;
   }
 
+  Future<Map<String, dynamic>?> performPatientRecognition() async {
+    if (kIsWeb) {
+      return null;
+    }
+
+    final cameraPermission = await Permission.camera.request();
+    if (!cameraPermission.isGranted) {
+      return null;
+    }
+
+    final imagePath = await _captureImage();
+    if (imagePath == null) {
+      return null;
+    }
+
+    final result = await attemptPatientRecognition(imagePath, 'phone_camera');
+    if (result != null) {
+      sessionToken = result['patient_session_token'] as String? ?? result['session_token'] as String?;
+      patientId = result['patient_id'] as int?;
+      recognizedPerson = result;
+      notifyListeners();
+      return result;
+    }
+
+    sessionToken = null;
+    patientId = null;
+    recognizedPerson = null;
+    notifyListeners();
+    return null;
+  }
+
   Future<String?> _captureImage() async {
     try {
       if (kIsWeb) {
@@ -63,6 +94,24 @@ class RecognitionService extends ChangeNotifier {
   Future<Map<String, dynamic>?> attemptRecognition(String imagePath, String source) async {
     try {
       final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-known-person/');
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['source'] = source;
+      request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode != 200) {
+        return null;
+      }
+      final payload = json.decode(response.body) as Map<String, dynamic>;
+      return payload;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> attemptPatientRecognition(String imagePath, String source) async {
+    try {
+      final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-patient/');
       final request = http.MultipartRequest('POST', uri);
       request.fields['source'] = source;
       request.files.add(await http.MultipartFile.fromPath('image', imagePath));
