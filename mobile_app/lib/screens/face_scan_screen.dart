@@ -6,6 +6,7 @@ import '../services/recognition_service.dart';
 import 'caregiver_dashboard_screen.dart';
 import 'caregiver_login_screen.dart';
 import 'patient_mode_screen.dart';
+import '../widgets/face_scan_camera.dart';
 
 class FaceScanScreen extends StatefulWidget {
   const FaceScanScreen({super.key});
@@ -27,16 +28,35 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   Future<void> _startScan() async {
     setState(() {
       _scanning = true;
-      _statusMessage = 'Checking who\'s here...';
+      _statusMessage = 'Scanning for a known patient...';
     });
 
-    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
 
-    final result = await recognitionService.performPatientRecognition().timeout(
-      const Duration(seconds: 15),
-      onTimeout: () => null,
+    final captureResult = await Navigator.of(context).push<FaceScanCaptureResult>(
+      MaterialPageRoute(builder: (_) => const FaceScanCamera(timeoutSeconds: 18)),
     );
+
+    if (!mounted) return;
+
+    if (captureResult == null || captureResult.cancelled || captureResult.image == null) {
+      setState(() {
+        _scanning = false;
+        _statusMessage = captureResult?.message ?? 'No face detected';
+      });
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => authService.accessToken != null ? const CaregiverDashboardScreen() : const CaregiverLoginScreen(),
+        ),
+      );
+      return;
+    }
+
+    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
+    final bytes = await captureResult.image!.readAsBytes();
+    final result = await recognitionService.attemptPatientRecognitionFromBytes(bytes, captureResult.image!.name, 'phone_auto_capture');
 
     if (!mounted) return;
 
@@ -48,6 +68,12 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
       return;
     }
 
+    setState(() {
+      _scanning = false;
+      _statusMessage = 'No matching patient found';
+    });
+    await Future.delayed(const Duration(milliseconds: 700));
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => authService.accessToken != null ? const CaregiverDashboardScreen() : const CaregiverLoginScreen(),
