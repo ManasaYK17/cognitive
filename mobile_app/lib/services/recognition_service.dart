@@ -1,6 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
-import 'package:camera/camera.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import '../services/api_client.dart';
@@ -66,6 +67,29 @@ class RecognitionService extends ChangeNotifier {
     return null;
   }
 
+  /// Attempt to recognize a patient using raw image bytes. Useful on web where
+  /// a file path is not available.
+  Future<Map<String, dynamic>?> attemptPatientRecognitionFromBytes(Uint8List bytes, String filename, String source) async {
+    try {
+      final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-patient/');
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['source'] = source;
+      request.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode != 200) return null;
+      final payload = json.decode(response.body) as Map<String, dynamic>;
+      // populate local state so callers can rely on RecognitionService state
+      sessionToken = payload['patient_session_token'] as String? ?? payload['session_token'] as String?;
+      patientId = payload['patient_id'] as int?;
+      recognizedPerson = payload;
+      notifyListeners();
+      return payload;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<String?> _captureImage() async {
     try {
       if (kIsWeb) {
@@ -76,16 +100,8 @@ class RecognitionService extends ChangeNotifier {
         return null;
       }
 
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        return null;
-      }
-
-      final controller = CameraController(cameras.first, ResolutionPreset.medium);
-      await controller.initialize();
-      final image = await controller.takePicture();
-      await controller.dispose();
-      return image.path;
+      final image = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
+      return image?.path;
     } catch (_) {
       return null;
     }

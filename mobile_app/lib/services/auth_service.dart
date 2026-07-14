@@ -28,13 +28,27 @@ class AuthService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final payload = json.decode(response.body) as Map<String, dynamic>;
         _accessToken = payload['access'] as String?;
+        _lastError = null;
         await _registerDeviceToken();
         notifyListeners();
         return true;
       }
+      try {
+        final err = json.decode(response.body);
+        if (err is Map) {
+          _lastError = err['detail']?.toString() ??
+              err['non_field_errors']?.join(' ')?.toString() ??
+              err.toString();
+        } else {
+          _lastError = err.toString();
+        }
+      } catch (_) {
+        _lastError = 'Login failed. Please check your credentials and try again.';
+      }
       return false;
     } catch (error) {
       debugPrint('AuthService.login error: $error');
+      _lastError = 'Unable to reach the backend. Please verify the server is running.';
       return false;
     }
   }

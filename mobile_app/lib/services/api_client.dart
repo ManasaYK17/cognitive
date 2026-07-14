@@ -6,8 +6,14 @@ import 'package:http/http.dart' as http;
 class ApiClient {
   static const timeoutDuration = Duration(seconds: 10);
   // Use host loopback so web builds and local runs point to the backend.
-  // If you need to run on Android emulator, change this back to 10.0.2.2 when building for emulator.
-  static String get baseUrl => 'http://127.0.0.1:8000/api';
+  // Override the host for emulator or device builds with: --dart-define=API_HOST=10.0.2.2:8000
+  static String get baseUrl {
+    const apiHost = String.fromEnvironment('API_HOST', defaultValue: '127.0.0.1:8000');
+    final normalizedHost = apiHost.startsWith('http://') || apiHost.startsWith('https://')
+        ? apiHost
+        : 'http://$apiHost';
+    return '$normalizedHost/api';
+  }
 
   Future<http.Response> post(
     String path, {

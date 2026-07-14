@@ -67,6 +67,20 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
     }
   }
 
+  Future<void> _scanFace() async {
+    try {
+      final image = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
+      if (image == null) return;
+      final bytes = await image.readAsBytes();
+      setState(() {
+        _images.add(image);
+        _imageBytes.add(bytes);
+      });
+    } catch (_) {
+      _showError('Unable to access the camera.');
+    }
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
@@ -174,25 +188,46 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
                       maxLines: 5,
                     ),
                     const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      onPressed: _pickImages,
-                      icon: const Icon(Icons.photo_library),
-                      label: const Text('Pick Face Images'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _scanFace,
+                            icon: const Icon(Icons.camera_alt_outlined),
+                            label: const Text('Scan face'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: _pickImages,
+                            icon: const Icon(Icons.photo_library_outlined),
+                            label: const Text('Upload photos'),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 10),
                     if (_images.isNotEmpty)
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: List.generate(
-                          _images.length,
-                          (index) => Image.memory(
-                            _imageBytes[index],
-                            width: 80,
-                            height: 80,
-                            fit: BoxFit.cover,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: List.generate(
+                              _images.length,
+                              (index) => Image.memory(
+                                _imageBytes[index],
+                                width: 80,
+                                height: 80,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 8),
+                          Text('${_images.length} of 10 minimum photos', style: const TextStyle(color: Colors.amber)),
+                        ],
                       ),
                     const SizedBox(height: 30),
                     ElevatedButton(onPressed: _save, child: const Text('Save Contact')),

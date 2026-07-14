@@ -48,41 +48,93 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
       appBar: AppBar(title: const Text('Known People')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView.separated(
-              itemCount: _knownPeople.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final person = _knownPeople[index] as Map<String, dynamic>;
-                return ListTile(
-                  title: Text(person['name'] as String? ?? 'Unknown'),
-                  subtitle: Text(person['relationship'] as String? ?? ''),
-                  trailing: const Icon(Icons.arrow_forward_ios),
-                  onTap: () async {
-                    final needRefresh = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(
-                        builder: (_) => KnownPersonDetailScreen(personId: person['id'] as int, patientId: widget.patientId),
-                      ),
-                    );
-                    if (needRefresh == true) {
-                      _loadKnownPeople();
-                    }
-                  },
-                );
-              },
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: _knownPeople.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final person = _knownPeople[index] as Map<String, dynamic>;
+                        final name = person['name'] as String? ?? 'Unknown';
+                        final relationship = person['relationship'] as String? ?? '';
+                        final initials = name
+                            .split(RegExp(r"\s+"))
+                            .where((s) => s.isNotEmpty)
+                            .map((s) => s[0])
+                            .take(2)
+                            .join()
+                            .toUpperCase();
+                        return GestureDetector(
+                          onTap: () async {
+                            final needRefresh = await Navigator.of(context).push<bool>(
+                              MaterialPageRoute(
+                                builder: (_) => KnownPersonDetailScreen(personId: person['id'] as int, patientId: widget.patientId),
+                              ),
+                            );
+                            if (needRefresh == true) {
+                              _loadKnownPeople();
+                            }
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).cardColor,
+                              borderRadius: BorderRadius.circular(16),
+                              boxShadow: [
+                                BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6, offset: const Offset(0, 2)),
+                              ],
+                            ),
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                                  child: Text(initials, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                      const SizedBox(height: 4),
+                                      Text(relationship, style: const TextStyle(color: Colors.grey)),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.arrow_forward_ios, size: 18),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final refresh = await Navigator.of(context).push<bool>(
+                          MaterialPageRoute(
+                            builder: (_) => KnownPersonDetailScreen(patientId: widget.patientId),
+                          ),
+                        );
+                        if (refresh == true) {
+                          _loadKnownPeople();
+                        }
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('+  Add known person'),
+                      style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                    ),
+                  ),
+                ],
+              ),
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final refresh = await Navigator.of(context).push<bool>(
-            MaterialPageRoute(
-              builder: (_) => KnownPersonDetailScreen(patientId: widget.patientId),
-            ),
-          );
-          if (refresh == true) {
-            _loadKnownPeople();
-          }
-        },
-        child: const Icon(Icons.add),
-      ),
     );
   }
 }

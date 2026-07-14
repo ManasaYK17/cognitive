@@ -273,7 +273,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: ListTile(
         leading: Icon(icon, color: Colors.grey),
-        title: Text(label, style: const TextStyle(color: Colors.black45, fontWeight: FontWeight.w600)),
+        title: Text(label, style: const TextStyle(color: Color.fromARGB(115, 227, 224, 224), fontWeight: FontWeight.w600)),
         trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey),
       ),
     );
@@ -294,7 +294,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
           child: Icon(icon, color: Theme.of(context).colorScheme.primary),
         ),
         title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(value, style: const TextStyle(color: Colors.black54)),
+        subtitle: Text(value, style: const TextStyle(color: Color.fromARGB(136, 53, 52, 52))),
         trailing: const Icon(Icons.arrow_forward_ios),
         onTap: onTap,
       ),

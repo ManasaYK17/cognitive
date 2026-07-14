@@ -40,7 +40,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen> {
       return;
     }
     setState(() {
-      _error = 'Incorrect username or password.';
+      _error = authService.lastError ?? 'Incorrect email or password.';
       _passwordController.clear();
     });
   }
@@ -68,7 +68,7 @@ class _CaregiverLoginScreenState extends State<CaregiverLoginScreen> {
             const SizedBox(height: 32),
             TextField(
               controller: _usernameController,
-              decoration: const InputDecoration(labelText: 'Username', hintText: 'Username'),
+              decoration: const InputDecoration(labelText: 'Email', hintText: 'Email'),
               keyboardType: TextInputType.emailAddress,
               autofocus: true,
             ),

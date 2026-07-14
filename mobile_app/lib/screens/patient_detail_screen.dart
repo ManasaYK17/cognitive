@@ -1,12 +1,15 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/recognition_service.dart';
 import '../theme/design_tokens.dart';
+import 'patient_mode_screen.dart';
 
 class PatientDetailScreen extends StatefulWidget {
   final int? patientId;
@@ -79,8 +82,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
 
   Future<void> _pickFaceImage() async {
     try {
-      final picker = ImagePicker();
-      final image = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+      final image = await ImagePicker().pickImage(
+        source: kIsWeb ? ImageSource.gallery : ImageSource.camera,
+        imageQuality: 80,
+      );
       if (image == null) return;
       final bytes = await image.readAsBytes();
       setState(() {
@@ -88,7 +93,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
         _faceImageBytes = [bytes];
       });
     } catch (_) {
-      _showError('Unable to capture patient face.');
+      _showError('Unable to capture or pick a patient image.');
     }
   }
 
@@ -139,6 +144,26 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
       final uploaded = await _uploadFaceImage(patientId, token);
       if (!uploaded) {
         _showError('Patient saved, but the face scan upload failed.');
+      } else {
+        // On web, attempt recognition immediately with the uploaded image bytes
+        if (kIsWeb && _faceImageBytes.isNotEmpty) {
+          try {
+            final recognitionService = Provider.of<RecognitionService>(context, listen: false);
+            final result = await recognitionService.attemptPatientRecognitionFromBytes(_faceImageBytes.first, _faceImages.first.name ?? 'upload.jpg', 'web_upload');
+            if (result != null && (result['patient_session_token'] != null || result['session_token'] != null)) {
+              final auth = Provider.of<AuthService>(context, listen: false);
+              final tokenToSet = result['patient_session_token'] as String? ?? result['session_token'] as String?;
+              if (tokenToSet != null) {
+                auth.setPatientSessionToken(tokenToSet);
+                if (!mounted) return;
+                Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PatientModeScreen()));
+                return;
+              }
+            }
+          } catch (_) {
+            // ignore recognition errors here, user can retry via normal scan
+          }
+        }
       }
     }
 

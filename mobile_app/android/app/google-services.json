@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "124143712874",
+    "project_id": "cognitive-assist",
+    "storage_bucket": "cognitive-assist.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:124143712874:android:18b21a5e8a291987782813",
+        "android_client_info": {
+          "package_name": "com.example.cognitive_assist_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCerQxOjld6q7Sb1Xu4h8UcW8hPh7ef48E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

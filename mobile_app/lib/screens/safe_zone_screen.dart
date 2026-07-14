@@ -22,6 +22,7 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
   final _latitudeController = TextEditingController();
   final _longitudeController = TextEditingController();
   final _radiusController = TextEditingController(text: '500');
+  double _radiusMeters = 500;
   bool _loading = true;
   bool _saving = false;
 
@@ -40,6 +41,7 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
       _latitudeController.text = data['center_latitude']?.toString() ?? '';
       _longitudeController.text = data['center_longitude']?.toString() ?? '';
       _radiusController.text = data['radius_meters']?.toString() ?? '500';
+      _radiusMeters = (data['radius_meters'] as num?)?.toDouble() ?? double.tryParse(_radiusController.text) ?? 500;
     }
     setState(() => _loading = false);
   }
@@ -64,11 +66,11 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
   Future<void> _saveSafeZone() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
-    final radius = double.tryParse(_radiusController.text.trim());
+    final radius = _radiusMeters;
     final latitude = double.tryParse(_latitudeController.text.trim());
     final longitude = double.tryParse(_longitudeController.text.trim());
-    if (radius == null || latitude == null || longitude == null) {
-      _showError('Latitude, longitude, and radius must be numeric.');
+    if (latitude == null || longitude == null) {
+      _showError('Latitude and longitude must be numeric.');
       setState(() => _saving = false);
       return;
     }
@@ -116,19 +118,72 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Safe zone settings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('Set Limit', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
                   Form(
                     key: _formKey,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextFormField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(labelText: 'Safe zone name'),
-                          validator: (value) => value?.trim().isEmpty == true ? 'Name is required' : null,
+                        // Visual preview area
+                        Container(
+                          height: 220,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).cardColor,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              GridPaper(
+                                color: Colors.grey.withOpacity(0.12),
+                                divisions: 4,
+                                interval: 20,
+                                subdivisions: 1,
+                              ),
+                              // Circle representing radius
+                              LayoutBuilder(builder: (context, constraints) {
+                                final maxVisual = 140.0; // max radius in pixels
+                                final maxMeters = 2000.0; // map max meters scale
+                                final normalized = (_radiusMeters.clamp(1, maxMeters)) / maxMeters;
+                                final radiusPx = 24.0 + normalized * maxVisual;
+                                return Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Container(
+                                      width: radiusPx * 2,
+                                      height: radiusPx * 2,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.6), width: 2),
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 12,
+                                      height: 12,
+                                      decoration: BoxDecoration(shape: BoxShape.circle, color: Theme.of(context).colorScheme.primary),
+                                    ),
+                                  ],
+                                );
+                              }),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
+                        // Radius slider
+                        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                          const Text('Radius:'),
+                          Text('${_radiusMeters.toStringAsFixed(0)} m'),
+                        ]),
+                        Slider(
+                          min: 50,
+                          max: 2000,
+                          divisions: 39,
+                          value: _radiusMeters.clamp(50, 2000),
+                          label: '${_radiusMeters.toStringAsFixed(0)} m',
+                          onChanged: (v) => setState(() => _radiusMeters = v.roundToDouble()),
+                        ),
+                        const SizedBox(height: 8),
                         TextFormField(
                           controller: _latitudeController,
                           decoration: const InputDecoration(labelText: 'Center latitude'),
@@ -143,18 +198,6 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
                           validator: (value) => value?.trim().isEmpty == true ? 'Longitude is required' : null,
                         ),
                         const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _radiusController,
-                          decoration: const InputDecoration(labelText: 'Radius (meters)'),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          validator: (value) {
-                            if (value?.trim().isEmpty == true) return 'Radius is required';
-                            final parsed = double.tryParse(value!.trim());
-                            if (parsed == null || parsed <= 0) return 'Enter a valid radius';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 20),
                         ElevatedButton(
                           onPressed: _useCurrentLocation,
                           child: const Text('Use current location'),
@@ -162,7 +205,8 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
                         const SizedBox(height: 12),
                         ElevatedButton(
                           onPressed: _saving ? null : _saveSafeZone,
-                          child: Text(_saving ? 'Saving…' : 'Save limit'),
+                          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                          child: Text(_saving ? 'Saving…' : 'Save'),
                         ),
                       ],
                     ),
