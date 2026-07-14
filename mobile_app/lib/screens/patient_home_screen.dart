@@ -7,6 +7,7 @@ import '../services/audio_service.dart';
 import '../services/location_service.dart';
 import '../services/recognition_service.dart';
 import '../theme/design_tokens.dart';
+import '../widgets/face_scan_camera.dart';
 import 'patient_history_screen.dart';
 
 class PatientHomeScreen extends StatefulWidget {
@@ -61,10 +62,24 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   Future<void> _attemptRecognition() async {
     setState(() => _scanning = true);
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
-    final success = await recognitionService.performRecognition();
+
+    final result = await Navigator.of(context).push<FaceScanCaptureResult>(
+      MaterialPageRoute(builder: (_) => const FaceScanCamera()),
+    );
+
+    if (!mounted) return;
     setState(() => _scanning = false);
 
-    if (!success) {
+    if (result == null || result.cancelled || result.image == null) {
+      if (result?.message != null) {
+        _showMessage(result!.message!);
+      }
+      return;
+    }
+
+    final bytes = await result.image!.readAsBytes();
+    final payload = await recognitionService.attemptRecognitionFromBytes(bytes, result.image!.name, 'phone_auto_capture');
+    if (payload == null || payload['match'] != true || recognitionService.sessionToken == null) {
       _showMessage('Recognition failed. Please try again.');
       return;
     }

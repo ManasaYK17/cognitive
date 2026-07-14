@@ -9,6 +9,7 @@ import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/recognition_service.dart';
 import '../theme/design_tokens.dart';
+import '../widgets/face_scan_camera.dart';
 import 'patient_mode_screen.dart';
 
 class PatientDetailScreen extends StatefulWidget {
@@ -82,14 +83,29 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
 
   Future<void> _pickFaceImage() async {
     try {
-      final image = await ImagePicker().pickImage(
-        source: kIsWeb ? ImageSource.gallery : ImageSource.camera,
-        imageQuality: 80,
+      if (kIsWeb) {
+        final image = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
+        if (image == null) return;
+        final bytes = await image.readAsBytes();
+        setState(() {
+          _faceImages = [image];
+          _faceImageBytes = [bytes];
+        });
+        return;
+      }
+
+      final result = await Navigator.of(context).push<FaceScanCaptureResult>(
+        MaterialPageRoute(builder: (_) => const FaceScanCamera()),
       );
-      if (image == null) return;
-      final bytes = await image.readAsBytes();
+      if (result == null || result.cancelled || result.image == null) {
+        if (result?.message != null) {
+          _showError(result!.message!);
+        }
+        return;
+      }
+      final bytes = await result.image!.readAsBytes();
       setState(() {
-        _faceImages = [image];
+        _faceImages = [result.image!];
         _faceImageBytes = [bytes];
       });
     } catch (_) {

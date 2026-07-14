@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../widgets/face_scan_camera.dart';
 
 class KnownPersonDetailScreen extends StatefulWidget {
   final int? personId;
@@ -69,11 +70,29 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
 
   Future<void> _scanFace() async {
     try {
-      final image = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-      if (image == null) return;
-      final bytes = await image.readAsBytes();
+      if (kIsWeb) {
+        final image = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
+        if (image == null) return;
+        final bytes = await image.readAsBytes();
+        setState(() {
+          _images.add(image);
+          _imageBytes.add(bytes);
+        });
+        return;
+      }
+
+      final result = await Navigator.of(context).push<FaceScanCaptureResult>(
+        MaterialPageRoute(builder: (_) => const FaceScanCamera()),
+      );
+      if (result == null || result.cancelled || result.image == null) {
+        if (result?.message != null) {
+          _showError(result!.message!);
+        }
+        return;
+      }
+      final bytes = await result.image!.readAsBytes();
       setState(() {
-        _images.add(image);
+        _images.add(result.image!);
         _imageBytes.add(bytes);
       });
     } catch (_) {

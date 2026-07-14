@@ -67,6 +67,26 @@ class RecognitionService extends ChangeNotifier {
     return null;
   }
 
+  Future<Map<String, dynamic>?> attemptRecognitionFromBytes(Uint8List bytes, String filename, String source) async {
+    try {
+      final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-known-person/');
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['source'] = source;
+      request.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode != 200) return null;
+      final payload = json.decode(response.body) as Map<String, dynamic>;
+      sessionToken = payload['session_token'] as String?;
+      patientId = payload['patient_id'] as int?;
+      recognizedPerson = payload;
+      notifyListeners();
+      return payload;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Attempt to recognize a patient using raw image bytes. Useful on web where
   /// a file path is not available.
   Future<Map<String, dynamic>?> attemptPatientRecognitionFromBytes(Uint8List bytes, String filename, String source) async {
