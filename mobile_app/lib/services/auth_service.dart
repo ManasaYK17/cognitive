@@ -21,10 +21,14 @@ class AuthService extends ChangeNotifier {
 
   Future<bool> login(String email, String password) async {
     try {
-      final response = await _client.post('/accounts/login/', body: {
-        'email': email,
-        'password': password,
-      });
+      final response = await _client.post(
+        '/accounts/login/',
+        body: {
+          'email': email,
+          'password': password,
+        },
+        timeout: const Duration(seconds: 12),
+      );
       if (response.statusCode == 200) {
         final payload = json.decode(response.body) as Map<String, dynamic>;
         _accessToken = payload['access'] as String?;
@@ -46,8 +50,9 @@ class AuthService extends ChangeNotifier {
         _lastError = 'Login failed. Please check your credentials and try again.';
       }
       return false;
-    } catch (error) {
-      debugPrint('AuthService.login error: $error');
+    } catch (error, stackTrace) {
+      debugPrint('AuthService.login error (${error.runtimeType}): $error');
+      debugPrint(stackTrace.toString());
       _lastError = 'Unable to reach the backend. Please verify the server is running.';
       return false;
     }
