@@ -135,16 +135,16 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
                           child: Stack(
                             alignment: Alignment.center,
                             children: [
-                              GridPaper(
-                                color: Colors.grey.withOpacity(0.12),
+                              const GridPaper(
+                                color: Color.fromRGBO(128, 128, 128, 0.12),
                                 divisions: 4,
                                 interval: 20,
                                 subdivisions: 1,
                               ),
                               // Circle representing radius
                               LayoutBuilder(builder: (context, constraints) {
-                                final maxVisual = 140.0; // max radius in pixels
-                                final maxMeters = 2000.0; // map max meters scale
+                                const maxVisual = 140.0; // max radius in pixels
+                                const maxMeters = 2000.0; // map max meters scale
                                 final normalized = (_radiusMeters.clamp(1, maxMeters)) / maxMeters;
                                 final radiusPx = 24.0 + normalized * maxVisual;
                                 return Stack(
@@ -155,7 +155,7 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
                                       height: radiusPx * 2,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.6), width: 2),
+                                        border: Border.all(color: Theme.of(context).colorScheme.primary.withAlpha((0.6 * 255).round()), width: 2),
                                       ),
                                     ),
                                     Container(

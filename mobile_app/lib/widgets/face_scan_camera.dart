@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -242,7 +241,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
                             children: [
                               Container(
                                 decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.white.withOpacity(0.9), width: 2),
+                                  border: Border.all(color: const Color.fromRGBO(255, 255, 255, 0.9), width: 2),
                                   borderRadius: BorderRadius.circular(28),
                                 ),
                               ),
@@ -255,7 +254,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
                                     child: Container(
                                       width: MediaQuery.of(context).size.width * 0.72,
                                       height: 2,
-                                      color: Colors.white.withOpacity(0.95),
+                                      color: const Color.fromRGBO(255, 255, 255, 0.95),
                                     ),
                                   );
                                 },

@@ -117,7 +117,7 @@ def _fallback_detect_face(image):
             if idx in visited:
                 continue
             pixel = pixels_list[idx]
-            if color_diff(pixel, dominant_color) <= 30:
+            if color_diff(pixel, dominant_color) <= 60:
                 visited.add(idx)
                 continue
             stack = [(x, y)]
@@ -133,16 +133,22 @@ def _fallback_detect_face(image):
                             continue
                         visited.add(nidx)
                         npixel = pixels_list[nidx]
-                        if color_diff(npixel, dominant_color) > 30:
+                        if color_diff(npixel, dominant_color) > 60:
                             stack.append((nx, ny))
             components.append(points)
 
     if not components:
         raise NoFaceDetectedError('No face detected in the image.')
-    if len(components) > 1:
-        raise MultipleFacesDetectedError('Multiple faces detected. Please upload a clearer image.')
 
-    points = components[0]
+    components.sort(key=len, reverse=True)
+    largest = components[0]
+    largest_size = len(largest)
+    if len(components) > 1:
+        second_size = len(components[1])
+        if second_size > max(50, largest_size // 4):
+            raise MultipleFacesDetectedError('Multiple faces detected. Please upload a clearer image.')
+
+    points = largest
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     w = max(xs) - min(xs) + 1
@@ -185,9 +191,20 @@ def detect_face(image) -> tuple:
     return _fallback_detect_face(image)
 
 
+def _fallback_encoding(image) -> list:
+    img = _load_pil_image(image).convert('RGB')
+    resized = img.resize((16, 16), Image.Resampling.LANCZOS).convert('L')
+    pixels = np.array(resized, dtype=np.float32).flatten() / 255.0
+    if pixels.size < 128:
+        pixels = np.pad(pixels, (0, 128 - pixels.size), mode='constant')
+    elif pixels.size > 128:
+        pixels = pixels[:128]
+    return [float(value) for value in pixels.tolist()]
+
+
 def generate_encoding(image, face_location) -> list:
     if face_recognition is None:
-        return [float(i) for i in range(128)]
+        return _fallback_encoding(image)
 
     img = _load_pil_image(image)
     img_np = np.array(img)

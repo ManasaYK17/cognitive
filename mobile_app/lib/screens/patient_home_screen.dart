@@ -3,12 +3,13 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
-import '../services/audio_service.dart';
 import '../services/location_service.dart';
 import '../services/recognition_service.dart';
 import '../theme/design_tokens.dart';
 import '../widgets/face_scan_camera.dart';
+import 'caregiver_login_screen.dart';
 import 'patient_history_screen.dart';
+import 'patient_recognition_result_screen.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   final int patientId;
@@ -29,6 +30,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   @override
   void initState() {
     super.initState();
+    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
+    recognitionService.clearRecognizedPerson();
     _loadRecentMemories();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prepareLocationReporting();
@@ -60,10 +63,19 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   Future<void> _attemptRecognition() async {
+    if (widget.sessionToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Patient has not been enrolled yet. Caregiver must save the patient profile first.')),
+      );
+      return;
+    }
+
     setState(() => _scanning = true);
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
+    final navigator = Navigator.of(context);
+    final messenger = ScaffoldMessenger.of(context);
 
-    final result = await Navigator.of(context).push<FaceScanCaptureResult>(
+    final result = await navigator.push<FaceScanCaptureResult>(
       MaterialPageRoute(builder: (_) => const FaceScanCamera()),
     );
 
@@ -72,40 +84,39 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
     if (result == null || result.cancelled || result.image == null) {
       if (result?.message != null) {
-        _showMessage(result!.message!);
+        messenger.showSnackBar(SnackBar(content: Text(result!.message!)));
       }
       return;
     }
 
     final bytes = await result.image!.readAsBytes();
-    final payload = await recognitionService.attemptRecognitionFromBytes(bytes, result.image!.name, 'phone_auto_capture');
-    if (payload == null || payload['match'] != true || recognitionService.sessionToken == null) {
-      _showMessage('Recognition failed. Please try again.');
+    final payload = await recognitionService.attemptRecognitionFromBytes(
+      bytes,
+      result.image!.name,
+      'phone_auto_capture',
+      sessionTokenOverride: widget.sessionToken,
+    );
+    if (payload == null || payload['match'] != true || recognitionService.sessionToken == null || payload['id'] == null) {
+      recognitionService.clearRecognizedPerson();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No matching person was detected. Please try again.')),
+      );
       return;
     }
 
-    _showMessage('Recognition complete.');
-  }
+    final knownPersonId = payload['id'] as int? ?? 0;
+    final knownPersonName = payload['name'] as String? ?? 'Person';
 
-  Future<void> _toggleRecording() async {
-    final audioService = Provider.of<AudioService>(context, listen: false);
-    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
-    if (audioService.recording) {
-      final knownPersonId = recognitionService.recognizedPerson?['id'] as int? ?? 0;
-      await audioService.stopRecordingAndSend(widget.patientId, knownPersonId, widget.sessionToken);
-      _showMessage(audioService.lastSummaryMessage ?? 'Recording saved successfully.');
-      return;
-    }
-
-    await audioService.startRecording();
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  void _showMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    navigator.push(
+      MaterialPageRoute(
+        builder: (_) => PatientRecognitionResultScreen(
+          patientId: widget.patientId,
+          knownPersonId: knownPersonId,
+          knownPersonName: knownPersonName,
+          sessionToken: widget.sessionToken,
+        ),
+      ),
+    );
   }
 
   Widget _buildTimeline() {
@@ -130,40 +141,65 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     );
   }
 
-  Widget _buildPersonCard() {
+  Widget _buildScanCard() {
     final recognitionService = Provider.of<RecognitionService>(context);
     final person = recognitionService.recognizedPerson;
+    final recognizedName = person != null && person['match'] == true ? person['name'] as String? : null;
+    final hasEnrollmentToken = widget.sessionToken.isNotEmpty;
 
-    if (person == null) {
-      return const Text('No one recognized yet.', style: TextStyle(color: DesignTokens.textPrimary, fontSize: 24));
-    }
-
-    return Card(
-      color: DesignTokens.lightSurface,
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(person['name'] as String? ?? 'Unknown', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 10),
-            Text('Relationship: ${person['relationship'] ?? 'N/A'}', style: const TextStyle(fontSize: 16)),
-            const SizedBox(height: 8),
-            Text(person['notes'] as String? ?? '', style: const TextStyle(fontSize: 14, color: DesignTokens.textSecondary)),
-          ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: (_scanning || !hasEnrollmentToken) ? null : _attemptRecognition,
+          child: Container(
+            width: 200,
+            height: 200,
+            decoration: BoxDecoration(
+              color: hasEnrollmentToken ? DesignTokens.surface : DesignTokens.lightSurface,
+              shape: BoxShape.circle,
+              border: Border.all(color: hasEnrollmentToken ? DesignTokens.accent : DesignTokens.subtleBorder, width: 4),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color.fromRGBO(0, 0, 0, 0.12),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Center(
+              child: Icon(
+                Icons.camera_alt,
+                size: 84,
+                color: hasEnrollmentToken ? DesignTokens.accent : DesignTokens.textSecondary,
+              ),
+            ),
+          ),
         ),
-      ),
+        const SizedBox(height: 18),
+        Text(
+          hasEnrollmentToken ? 'Scan using camera icon' : 'Ask caregiver to save patient profile first',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: DesignTokens.textSecondary),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 12),
+        if (_scanning)
+          const CircularProgressIndicator()
+        else if (recognizedName != null)
+          Text('Recognized: $recognizedName', style: Theme.of(context).textTheme.titleMedium),
+      ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final recognitionService = Provider.of<RecognitionService>(context);
-    final audioService = Provider.of<AudioService>(context);
     final person = recognitionService.recognizedPerson;
-    final statusText = person != null ? 'Recognized: ${person['name']}' : 'Ready to scan';
+    final statusText = widget.sessionToken.isEmpty
+        ? 'Patient not enrolled yet. Caregiver must save profile before scan.'
+        : person != null
+            ? 'Recognized: ${person['name']}'
+            : 'Ready to scan';
 
     return Scaffold(
       backgroundColor: DesignTokens.pageBackground,
@@ -174,26 +210,15 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             children: [
               Text(statusText, style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 16),
-              Expanded(child: Center(child: _buildPersonCard())),
+              Expanded(child: Center(child: _buildScanCard())),
               const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _scanning ? null : _attemptRecognition,
-                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                child: Text(_scanning ? 'Scanning...' : 'Scan Face'),
-              ),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: person == null ? null : _toggleRecording,
-                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56), backgroundColor: person == null ? Colors.grey : Colors.blue),
-                child: Text(audioService.recording ? 'Stop recording' : 'Record conversation'),
-              ),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => PatientHistoryScreen(sessionToken: widget.sessionToken)));
                 },
                 style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                child: const Text('View Full History'),
+                child: const Text('People I’ve talked to'),
               ),
               const SizedBox(height: 20),
               Align(alignment: Alignment.centerLeft, child: Text('Recent memories', style: Theme.of(context).textTheme.titleMedium)),

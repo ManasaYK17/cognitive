@@ -51,12 +51,55 @@ def transcribe_audio(audio_file):
         raise SpeechToTextError('Speech could not be understood.')
 
 
-def summarize_transcript(transcript, ollama_url, model_name, timeout_seconds=10):
+def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_seconds=10):
     prompt = (
         'Please provide a concise 2-3 sentence summary of the following conversation transcript:\n\n'
         f'{transcript}\n\n'
         'Summary:'
     )
+
+    if api_key or 'openrouter.ai' in api_url.lower() or api_url.endswith('/chat/completions'):
+        payload = {
+            'model': model_name,
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': prompt,
+                }
+            ],
+            'temperature': 0.2,
+            'max_tokens': 200,
+        }
+        headers = {'Content-Type': 'application/json'}
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+
+        try:
+            response = requests.post(api_url, json=payload, headers=headers, timeout=timeout_seconds)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            logger.exception('OpenRouter summarization request failed')
+            raise SummarizationError(f'Summarization service unavailable: {exc}') from exc
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise SummarizationError('Invalid response from summarization service.') from exc
+
+        choices = body.get('choices')
+        if not choices or not isinstance(choices, list):
+            raise SummarizationError('Summarization response did not contain choices.')
+
+        first_choice = choices[0]
+        message = first_choice.get('message') or {}
+        content = message.get('content') if isinstance(message, dict) else None
+        if not content:
+            raise SummarizationError('Summarization response did not contain content.')
+
+        if isinstance(content, dict):
+            content = content.get('text')
+        return content.strip()
+
     payload = {
         'model': model_name,
         'prompt': prompt,
@@ -65,7 +108,7 @@ def summarize_transcript(transcript, ollama_url, model_name, timeout_seconds=10)
     }
 
     try:
-        response = requests.post(ollama_url, json=payload, timeout=timeout_seconds)
+        response = requests.post(api_url, json=payload, timeout=timeout_seconds)
         response.raise_for_status()
     except requests.RequestException as exc:
         logger.exception('Ollama summarization request failed')
@@ -87,7 +130,6 @@ def summarize_transcript(transcript, ollama_url, model_name, timeout_seconds=10)
 
     text_parts = [item.get('text') for item in output if isinstance(item, dict) and item.get('type') == 'output_text']
     if not text_parts:
-        # fallback to any available text field
         text_parts = [item.get('text') for item in output if isinstance(item, dict) and item.get('text')]
 
     if not text_parts:

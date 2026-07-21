@@ -16,6 +16,13 @@ class PatientModeScreen extends StatelessWidget {
     final sessionToken = authService.patientSessionToken;
     final patientId = recognitionService.patientId ?? 0;
 
+    if (sessionToken != null && sessionToken.isNotEmpty) {
+      recognitionService.sessionToken = sessionToken;
+    }
+    if (patientId != 0) {
+      recognitionService.patientId = patientId;
+    }
+
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: Provider.of<LocationService>(context, listen: false)),

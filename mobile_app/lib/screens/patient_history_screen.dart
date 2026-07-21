@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import 'patient_history_detail_screen.dart';
 
 class PatientHistoryScreen extends StatefulWidget {
   final String sessionToken;
@@ -47,11 +48,23 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
               separatorBuilder: (_, __) => const Divider(),
               itemBuilder: (context, index) {
                 final item = _history[index] as Map<String, dynamic>;
+                final knownPersonId = item['known_person_id'] as int?;
+                final knownPersonName = item['known_person_name'] as String? ?? 'Unknown';
                 return ListTile(
-                  title: Text(item['known_person_name'] as String? ?? 'Unknown'),
+                  title: Text(knownPersonName),
                   subtitle: Text(item['last_summary'] as String? ?? ''),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {},
+                  onTap: knownPersonId == null
+                      ? null
+                      : () {
+                          Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) => PatientHistoryDetailScreen(
+                              sessionToken: widget.sessionToken,
+                              knownPersonId: knownPersonId,
+                              knownPersonName: knownPersonName,
+                            ),
+                          ));
+                        },
                 );
               },
             ),

@@ -10,7 +10,7 @@ from known_people.models import KnownPerson
 from history.models import RecognitionHistory
 from .services import detect_face, generate_encoding, NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError
 from .models import FaceEncoding
-from PIL import Image
+from PIL import Image, ImageDraw
 import io
 import numpy as np
 
@@ -23,7 +23,8 @@ class RecognitionServiceTests(TestCase):
     def _make_image(self, size=(120, 120), color=(255, 0, 0), with_face=True):
         image = Image.new('RGB', size, color)
         if with_face:
-            image = image.crop((20, 20, 100, 100))
+            draw = ImageDraw.Draw(image)
+            draw.ellipse((20, 20, 100, 100), fill=(0, 0, 255))
         buffer = io.BytesIO()
         image.save(buffer, format='JPEG')
         return SimpleUploadedFile('face.jpg', buffer.getvalue(), content_type='image/jpeg')
@@ -74,7 +75,8 @@ class RecognitionEndpointTests(APITestCase):
     def _make_image(self, size=(120, 120), color=(255, 0, 0), with_face=True):
         image = Image.new('RGB', size, color)
         if with_face:
-            image = image.crop((20, 20, 100, 100))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((20, 20, 100, 100), fill=(0, 0, 255))
         buffer = io.BytesIO()
         image.save(buffer, format='JPEG')
         return SimpleUploadedFile('face.jpg', buffer.getvalue(), content_type='image/jpeg')
@@ -86,6 +88,16 @@ class RecognitionEndpointTests(APITestCase):
         self.assertEqual(response.data['patient_id'], self.patient.id)
         self.assertIn('patient_session_token', response.data)
         self.assertTrue(RecognitionHistory.objects.filter(patient=self.patient, outcome='matched').exists())
+
+    def test_issue_patient_session_token_returns_signed_token(self):
+        response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['patient_id'], self.patient.id)
+        self.assertIn('patient_session_token', response.data)
 
     def test_identify_known_person_requires_patient_session_token(self):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
@@ -99,3 +111,29 @@ class RecognitionEndpointTests(APITestCase):
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['id'], self.known_person.id)
         self.assertTrue(RecognitionHistory.objects.filter(patient=self.patient, subject=self.known_person, outcome='matched').exists())
+
+    def test_identify_known_person_returns_no_match_when_no_known_people(self):
+        self.known_person.delete()
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self.image, 'source': 'phone_camera'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertIsNone(response.data.get('id'))
+        self.assertIsNone(response.data.get('name'))
+
+    def test_identify_known_person_returns_bad_request_for_non_face_image(self):
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        bad_image = self._make_image(with_face=False)
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': bad_image, 'source': 'phone_camera'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)

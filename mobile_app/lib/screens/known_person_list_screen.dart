@@ -82,8 +82,8 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
                             decoration: BoxDecoration(
                               color: Theme.of(context).cardColor,
                               borderRadius: BorderRadius.circular(16),
-                              boxShadow: [
-                                BoxShadow(color: Colors.black.withOpacity(0.12), blurRadius: 6, offset: const Offset(0, 2)),
+                              boxShadow: const [
+                                BoxShadow(color: Color.fromRGBO(0, 0, 0, 0.12), blurRadius: 6, offset: Offset(0, 2)),
                               ],
                             ),
                             padding: const EdgeInsets.all(12),
@@ -91,7 +91,7 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
                               children: [
                                 CircleAvatar(
                                   radius: 24,
-                                  backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                                  backgroundColor: Theme.of(context).colorScheme.primary.withAlpha((0.2 * 255).round()),
                                   child: Text(initials, style: const TextStyle(fontWeight: FontWeight.bold)),
                                 ),
                                 const SizedBox(width: 12),

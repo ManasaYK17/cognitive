@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -160,25 +159,28 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
       final uploaded = await _uploadFaceImage(patientId, token);
       if (!uploaded) {
         _showError('Patient saved, but the face scan upload failed.');
-      } else {
-        // On web, attempt recognition immediately with the uploaded image bytes
-        if (kIsWeb && _faceImageBytes.isNotEmpty) {
-          try {
-            final recognitionService = Provider.of<RecognitionService>(context, listen: false);
-            final result = await recognitionService.attemptPatientRecognitionFromBytes(_faceImageBytes.first, _faceImages.first.name ?? 'upload.jpg', 'web_upload');
-            if (result != null && (result['patient_session_token'] != null || result['session_token'] != null)) {
-              final auth = Provider.of<AuthService>(context, listen: false);
-              final tokenToSet = result['patient_session_token'] as String? ?? result['session_token'] as String?;
-              if (tokenToSet != null) {
-                auth.setPatientSessionToken(tokenToSet);
-                if (!mounted) return;
-                Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const PatientModeScreen()));
-                return;
-              }
+      } else if (_faceImageBytes.isNotEmpty) {
+        try {
+          final auth = Provider.of<AuthService>(context, listen: false); // ignore: use_build_context_synchronously
+          final response = await _api.post(
+            '/recognition/issue-patient-session-token/',
+            body: {'patient_id': patientId, 'device_id': 'patient-profile-save'},
+            token: token,
+          );
+          if (response.statusCode == 200) {
+            final payload = json.decode(response.body) as Map<String, dynamic>;
+            final String? finalToken = payload['patient_session_token'] as String?;
+            if (finalToken != null && finalToken.isNotEmpty) {
+              auth.setPatientSessionToken(finalToken);
+              if (!mounted) return;
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const PatientModeScreen()),
+              );
+              return;
             }
-          } catch (_) {
-            // ignore recognition errors here, user can retry via normal scan
           }
+        } catch (_) {
+          // ignore recognition errors here, user can retry via normal scan
         }
       }
     }

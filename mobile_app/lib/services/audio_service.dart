@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_client.dart';
@@ -13,49 +14,56 @@ class AudioService extends ChangeNotifier {
 
   Future<bool> ensurePermission() async {
     if (kIsWeb) return false;
-    return await _recorder.hasPermission();
+    final permission = await Permission.microphone.request();
+    return permission.isGranted;
   }
 
-  Future<void> startRecording() async {
-    if (kIsWeb) return;
-    if (await _recorder.hasPermission() && !_recording) {
-      final tempPath = '/tmp/cognitive_assist_recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _recorder.start(const RecordConfig(), path: tempPath);
-      _recording = true;
-      notifyListeners();
-    }
+  Future<bool> startRecording() async {
+    if (kIsWeb) return false;
+    if (!await ensurePermission() || _recording) return false;
+
+    final tempPath = '/tmp/cognitive_assist_recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    await _recorder.start(const RecordConfig(), path: tempPath);
+    _recording = true;
+    lastSummaryMessage = null;
+    notifyListeners();
+    return true;
   }
 
-  Future<void> stopRecordingAndSend(int patientId, int knownPersonId, String sessionToken) async {
+  Future<bool> stopRecordingAndSend(int patientId, int knownPersonId, String sessionToken) async {
     if (kIsWeb) {
       lastSummaryMessage = 'Audio recording not available on web.';
       notifyListeners();
-      return;
+      return false;
     }
-    if (!_recording) return;
+    if (!_recording) return false;
+
     final path = await _recorder.stop();
     _recording = false;
     notifyListeners();
 
-    if (path == null) {
+    if (path == null || path.isEmpty) {
       lastSummaryMessage = 'No audio recorded.';
       notifyListeners();
-      return;
+      return false;
     }
 
     final request = http.MultipartRequest('POST', Uri.parse('${ApiClient.baseUrl}/conversations/summarize/'));
     request.headers['Authorization'] = 'Bearer $sessionToken';
     request.fields['known_person_id'] = knownPersonId.toString();
     request.fields['patient_id'] = patientId.toString();
-    request.files.add(await http.MultipartFile.fromPath('audio_file', path));
+    request.files.add(await http.MultipartFile.fromPath('audio', path));
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
     if (response.statusCode == 201 || response.statusCode == 200) {
-      lastSummaryMessage = 'Conversation saved successfully';
-    } else {
-      lastSummaryMessage = 'Failed to save conversation';
+      lastSummaryMessage = 'Conversation saved successfully.';
+      notifyListeners();
+      return true;
     }
+
+    lastSummaryMessage = 'Failed to save conversation.';
     notifyListeners();
+    return false;
   }
 }

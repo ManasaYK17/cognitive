@@ -27,7 +27,7 @@ class AuthService extends ChangeNotifier {
           'email': email,
           'password': password,
         },
-        timeout: const Duration(seconds: 12),
+        timeout: const Duration(seconds: 15),
       );
       if (response.statusCode == 200) {
         final payload = json.decode(response.body) as Map<String, dynamic>;
@@ -52,7 +52,7 @@ class AuthService extends ChangeNotifier {
       return false;
     } catch (error, stackTrace) {
       debugPrint('AuthService.login error (${error.runtimeType}): $error');
-      debugPrint(stackTrace.toString());
+      debugPrint('AuthService.login stack trace: $stackTrace');
       _lastError = 'Unable to reach the backend. Please verify the server is running.';
       return false;
     }

@@ -30,6 +30,25 @@ class DeviceScopedRateThrottle(SimpleRateThrottle):
         }
 
 
+class IssuePatientSessionTokenView(views.APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        patient_id = request.data.get('patient_id') or request.data.get('patientId')
+        device_id = request.data.get('device_id') or request.data.get('deviceId') or 'unknown'
+
+        if not patient_id:
+            return Response({'detail': 'A patient id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        patient = Patient.objects.filter(id=patient_id).first()
+        if patient is None:
+            return Response({'detail': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        session_token = dumps({'patient_id': patient.id, 'device_id': device_id})
+        return Response({'patient_id': patient.id, 'patient_session_token': session_token}, status=status.HTTP_200_OK)
+
+
 class IdentifyPatientView(views.APIView):
     authentication_classes = []
     parser_classes = (MultiPartParser, FormParser)
@@ -47,16 +66,9 @@ class IdentifyPatientView(views.APIView):
             face_location = detect_face(image)
             encoding = generate_encoding(image, face_location)
         except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as exc:
-            fallback_image = self._get_fallback_image()
-            if fallback_image is None:
-                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                face_location = detect_face(fallback_image.image)
-                encoding = generate_encoding(fallback_image.image, face_location)
-            except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as fallback_exc:
-                return Response({'detail': str(fallback_exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.7)
+        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.55)
         best_patient = None
         best_confidence = 0.0
 
@@ -69,6 +81,12 @@ class IdentifyPatientView(views.APIView):
                     best_patient = patient
 
         matched = best_patient is not None and best_confidence >= threshold
+        if matched and best_patient is not None and best_patient.face_images.exists():
+            patient_image_encoding = FaceEncoding.objects.filter(face_image__patient_subject=best_patient).first()
+            if patient_image_encoding is not None and patient_image_encoding.encoding and len(patient_image_encoding.encoding) > 0:
+                confidence = self._similarity_score(encoding, patient_image_encoding.encoding)
+                matched = confidence >= threshold
+                best_confidence = confidence
         patient_id = best_patient.id if matched and best_patient else None
         device_id = request.data.get('device_id') or request.data.get('deviceId') or 'unknown'
 
@@ -161,14 +179,7 @@ class IdentifyKnownPersonView(views.APIView):
             face_location = detect_face(image)
             encoding = generate_encoding(image, face_location)
         except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as exc:
-            fallback_image = self._get_fallback_image(patient)
-            if fallback_image is None:
-                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-            try:
-                face_location = detect_face(fallback_image.image)
-                encoding = generate_encoding(fallback_image.image, face_location)
-            except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as fallback_exc:
-                return Response({'detail': str(fallback_exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.7)
         best_known_person = None

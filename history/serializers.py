@@ -31,6 +31,16 @@ class HistoryFeedSerializer(serializers.Serializer):
     error_message = serializers.CharField(read_only=True, allow_null=True)
 
 
+class PatientHistoryConversationSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    known_person_id = serializers.IntegerField(read_only=True)
+    known_person_name = serializers.CharField(read_only=True)
+    summary = serializers.CharField(read_only=True, allow_null=True)
+    transcript = serializers.CharField(read_only=True, allow_null=True)
+    error_message = serializers.CharField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
 class PatientHistorySummarySerializer(serializers.Serializer):
     known_person_id = serializers.IntegerField(read_only=True)
     known_person_name = serializers.CharField(read_only=True)

@@ -118,7 +118,25 @@ class PatientHistoryView(APIView):
         if not patient_id:
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        history_qs = ConversationHistory.objects.filter(patient_id=patient_id).order_by('known_person_id', '-created_at')
+        known_person_id = request.query_params.get('known_person_id')
+        history_qs = ConversationHistory.objects.filter(patient_id=patient_id)
+        if known_person_id:
+            history_qs = history_qs.filter(known_person_id=known_person_id).order_by('-created_at')
+            response_data = [
+                {
+                    'id': item.id,
+                    'known_person_id': item.known_person_id,
+                    'known_person_name': item.known_person.name,
+                    'summary': item.summary,
+                    'transcript': item.transcript,
+                    'error_message': item.error_message,
+                    'created_at': item.created_at,
+                }
+                for item in history_qs
+            ]
+            return Response(response_data)
+
+        history_qs = history_qs.order_by('known_person_id', '-created_at')
         latest_by_person = {}
         for item in history_qs:
             kp_id = item.known_person_id

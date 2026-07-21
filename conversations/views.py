@@ -77,11 +77,23 @@ class ConversationSummarizeView(views.APIView):
             )
             return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
 
+        openrouter_url = getattr(settings, 'OPENROUTER_API_URL', '')
+        openrouter_api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
+        openrouter_model_name = getattr(settings, 'OPENROUTER_MODEL_NAME', 'qwen-2.5-mini')
         ollama_url = getattr(settings, 'OLLAMA_API_URL', 'http://localhost:11434/api/generate')
-        model_name = getattr(settings, 'OLLAMA_MODEL_NAME', 'qwen2.5:7b')
+        ollama_model_name = getattr(settings, 'OLLAMA_MODEL_NAME', 'qwen2.5:7b')
+
+        if openrouter_api_key:
+            api_url = openrouter_url
+            model_name = openrouter_model_name
+            api_key = openrouter_api_key
+        else:
+            api_url = ollama_url
+            model_name = ollama_model_name
+            api_key = None
 
         try:
-            summary = summarize_transcript(transcript, ollama_url, model_name)
+            summary = summarize_transcript(transcript, api_url, model_name, api_key=api_key)
         except SummarizationError as exc:
             error_message = str(exc)
 

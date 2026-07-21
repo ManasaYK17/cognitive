@@ -111,6 +111,9 @@ SIMPLE_JWT = {
 RECOGNITION_CONFIDENCE_THRESHOLD = 0.7
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL_NAME = os.environ.get('OLLAMA_MODEL_NAME', 'qwen2.5:7b')
+OPENROUTER_API_URL = os.environ.get('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')
+OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+OPENROUTER_MODEL_NAME = os.environ.get('OPENROUTER_MODEL_NAME', 'qwen-2.5-mini')
 FCM_SERVICE_ACCOUNT_JSON = os.environ.get('FCM_SERVICE_ACCOUNT_JSON')
 
 REST_FRAMEWORK = {

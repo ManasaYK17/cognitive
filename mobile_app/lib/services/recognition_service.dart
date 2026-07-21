@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
@@ -67,24 +66,40 @@ class RecognitionService extends ChangeNotifier {
     return null;
   }
 
-  Future<Map<String, dynamic>?> attemptRecognitionFromBytes(Uint8List bytes, String filename, String source) async {
+  Future<Map<String, dynamic>?> attemptRecognitionFromBytes(Uint8List bytes, String filename, String source, {String? sessionTokenOverride}) async {
     try {
+      final token = sessionTokenOverride ?? sessionToken;
+      if (token == null || token.isEmpty) {
+        return null;
+      }
+
       final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-known-person/');
       final request = http.MultipartRequest('POST', uri);
       request.fields['source'] = source;
+      request.headers['Authorization'] = 'Bearer $token';
       request.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
       if (response.statusCode != 200) return null;
       final payload = json.decode(response.body) as Map<String, dynamic>;
-      sessionToken = payload['session_token'] as String?;
-      patientId = payload['patient_id'] as int?;
-      recognizedPerson = payload;
+      final match = payload['match'] == true;
+      if (match) {
+        sessionToken = token;
+        patientId = payload['patient_id'] as int?;
+        recognizedPerson = payload;
+      } else {
+        recognizedPerson = null;
+      }
       notifyListeners();
       return payload;
     } catch (_) {
       return null;
     }
+  }
+
+  void clearRecognizedPerson() {
+    recognizedPerson = null;
+    notifyListeners();
   }
 
   /// Attempt to recognize a patient using raw image bytes. Useful on web where
