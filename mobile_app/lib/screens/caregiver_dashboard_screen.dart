@@ -234,8 +234,13 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
           icon: Icons.group,
           label: 'Known People',
           value: '$_knownPeopleCount people added',
-          onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => KnownPersonListScreen(patientId: patientId)));
+          onTap: () async {
+            final changed = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(builder: (_) => KnownPersonListScreen(patientId: patientId)),
+            );
+            if (changed == true) {
+              _loadPatient();
+            }
           },
         ),
         const SizedBox(height: 12),

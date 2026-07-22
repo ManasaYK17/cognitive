@@ -7,6 +7,8 @@ from .serializers import KnownPersonSerializer
 from .permissions import IsCaregiverForKnownPerson
 from patients.models import FaceImage
 from patients.serializers import FaceImageSerializer
+from recognition.services import detect_face, generate_encoding
+from recognition.models import FaceEncoding
 
 
 class KnownPersonListCreateView(generics.ListCreateAPIView):
@@ -46,7 +48,10 @@ class KnownPersonFaceImageView(generics.CreateAPIView):
         files = request.FILES.getlist('files')
         if not files:
             return Response({'detail': 'No files provided.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Remove existing known-person face images so the new upload replaces previous faces
         content_type = ContentType.objects.get_for_model(known_person.__class__)
+        FaceImage.objects.filter(content_type=content_type, object_id=known_person.id).delete()
+
         created_images = []
         for image_file in files:
             face_image = FaceImage.objects.create(
@@ -55,5 +60,19 @@ class KnownPersonFaceImageView(generics.CreateAPIView):
                 object_id=known_person.id,
                 content_type=content_type,
             )
+            # Ensure a FaceEncoding exists for the newly created face image (generate synchronously)
+            try:
+                face_location = detect_face(face_image.image)
+                encoding = generate_encoding(face_image.image, face_location)
+                FaceEncoding.objects.create(
+                    subject_type=face_image.subject_type,
+                    content_type=face_image.content_type,
+                    object_id=face_image.object_id,
+                    face_image=face_image,
+                    encoding=encoding,
+                )
+            except Exception:
+                # If encoding generation fails, continue — signal handler may still create it asynchronously
+                pass
             created_images.append(FaceImageSerializer(face_image).data)
         return Response(created_images, status=status.HTTP_201_CREATED)

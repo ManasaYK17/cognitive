@@ -171,12 +171,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
             final payload = json.decode(response.body) as Map<String, dynamic>;
             final String? finalToken = payload['patient_session_token'] as String?;
             if (finalToken != null && finalToken.isNotEmpty) {
+              // Store patient session token for future recognition flows, but do not navigate
               auth.setPatientSessionToken(finalToken);
-              if (!mounted) return;
-              Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const PatientModeScreen()),
-              );
-              return;
             }
           }
         } catch (_) {
