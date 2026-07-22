@@ -1,9 +1,14 @@
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 from .models import Patient, FaceImage
 from accounts.models import Caregiver
+from conversations.models import ConversationHistory
+from geofencing.models import LocationPing, SafeZone
+from history.models import RecognitionHistory
+from known_people.models import KnownPerson
 
 
 class PatientTests(APITestCase):
@@ -55,3 +60,39 @@ class PatientTests(APITestCase):
         replacement_response = self.client.post(upload_url, {'files': [image_two]}, format='multipart')
         self.assertEqual(replacement_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(FaceImage.objects.filter(patient_subject=patient).count(), 1)
+
+    def test_dashboard_summary_includes_aggregated_metrics(self):
+        patient = Patient.objects.create(caregiver=self.caregiver, name='Dana', age=72, medical_notes='Summary test')
+        known_person = KnownPerson.objects.create(patient=patient, name='Mina', relationship='Daughter')
+        RecognitionHistory.objects.create(
+            patient=patient,
+            subject_type='known_person',
+            content_type=None,
+            object_id=known_person.id,
+            confidence_score=0.82,
+            source='phone_camera',
+            outcome='matched',
+            timestamp=timezone.now(),
+        )
+        RecognitionHistory.objects.create(
+            patient=patient,
+            subject_type='patient',
+            content_type=None,
+            object_id=patient.id,
+            confidence_score=0.61,
+            source='phone_camera',
+            outcome='not_matched',
+            timestamp=timezone.now(),
+        )
+        ConversationHistory.objects.create(patient=patient, known_person=known_person, summary='Saved summary', transcript='hi')
+        SafeZone.objects.create(patient=patient, name='Home', center_latitude=1.0, center_longitude=2.0, radius_meters=100)
+        LocationPing.objects.create(patient=patient, latitude=1.0, longitude=2.0, distance_from_center_meters=25)
+
+        response = self.client.get(reverse('patient-dashboard-summary', kwargs={'pk': patient.id}))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['today']['known_detections'], 1)
+        self.assertEqual(response.data['today']['unknown_detections'], 1)
+        self.assertEqual(response.data['conversations_saved'], 1)
+        self.assertTrue(response.data['safe_zone']['inside'])
+        self.assertGreaterEqual(len(response.data['recent_activity']), 1)

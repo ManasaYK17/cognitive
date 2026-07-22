@@ -27,7 +27,6 @@ class AuthService extends ChangeNotifier {
           'email': email,
           'password': password,
         },
-        timeout: const Duration(seconds: 15),
       );
       if (response.statusCode == 200) {
         final payload = json.decode(response.body) as Map<String, dynamic>;

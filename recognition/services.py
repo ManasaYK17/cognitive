@@ -176,7 +176,10 @@ def detect_face(image) -> tuple:
 
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
             if len(faces) == 0:
-                raise NoFaceDetectedError('No face detected in the image.')
+                # OpenCV's Haar detector can miss faces in phone captures with
+                # different lighting or orientation. Use the local fallback
+                # before rejecting the image.
+                return _fallback_detect_face(image)
             if len(faces) > 1:
                 raise MultipleFacesDetectedError('Multiple faces detected. Please upload a clearer image.')
 

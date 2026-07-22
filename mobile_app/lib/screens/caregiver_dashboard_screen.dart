@@ -19,10 +19,9 @@ class CaregiverDashboardScreen extends StatefulWidget {
 class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
   final ApiClient _api = ApiClient();
   bool _loading = true;
+  bool _sidebarExpanded = false;
   Map<String, dynamic>? _patient;
-  int _knownPeopleCount = 0;
-  int _historyCount = 0;
-  String? _safeZoneLabel;
+  Map<String, dynamic>? _summary;
 
   @override
   void initState() {
@@ -31,82 +30,84 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
   }
 
   Future<void> _loadPatient() async {
-    setState(() => _loading = true);
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+    });
+
     final token = Provider.of<AuthService>(context, listen: false).accessToken;
     final response = await _api.get('/patients/', token: token);
+
+    if (!mounted) return;
     if (response.statusCode == 200) {
       final patient = json.decode(response.body) as Map<String, dynamic>;
-      await _loadPatientMetadata(token, patient['id'] as int);
+      final patientId = patient['id'] as int;
+      if (token != null) {
+        final summaryResponse = await _api.get('/patients/$patientId/dashboard-summary/', token: token);
+        if (!mounted) return;
+        if (summaryResponse.statusCode == 200) {
+          final summary = json.decode(summaryResponse.body) as Map<String, dynamic>;
+          setState(() {
+            _patient = patient;
+            _summary = summary;
+            _loading = false;
+          });
+          return;
+        }
+      }
       setState(() {
         _patient = patient;
+        _summary = null;
         _loading = false;
       });
       return;
     }
+
     setState(() {
       _patient = null;
-      _knownPeopleCount = 0;
-      _historyCount = 0;
-      _safeZoneLabel = null;
+      _summary = null;
       _loading = false;
     });
   }
 
-  Future<void> _loadPatientMetadata(String? token, int patientId) async {
-    await Future.wait([
-      _loadKnownPeopleCount(token, patientId),
-      _loadHistoryCount(token, patientId),
-      _loadSafeZoneLabel(token, patientId),
-    ]);
-  }
-
-  Future<void> _loadKnownPeopleCount(String? token, int patientId) async {
-    if (token == null) return;
-    final response = await _api.get('/known-people/', token: token, params: {'patient': patientId.toString()});
-    if (response.statusCode == 200) {
-      final list = json.decode(response.body) as List<dynamic>;
-      setState(() => _knownPeopleCount = list.length);
-    }
-  }
-
-  Future<void> _loadHistoryCount(String? token, int patientId) async {
-    if (token == null) return;
-    final response = await _api.get('/history/', token: token, params: {'patient': patientId.toString()});
-    if (response.statusCode == 200) {
-      final list = json.decode(response.body) as List<dynamic>;
-      setState(() => _historyCount = list.length);
-    }
-  }
-
-  Future<void> _loadSafeZoneLabel(String? token, int patientId) async {
-    if (token == null) return;
-    final response = await _api.get('/patients/$patientId/safe-zone/', token: token);
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body) as Map<String, dynamic>;
-      final radius = data['radius_meters']?.toStringAsFixed(0);
-      setState(() => _safeZoneLabel = radius != null ? '${radius}m from Home' : 'Set limit');
-      return;
-    }
-    setState(() => _safeZoneLabel = 'Set limit');
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Patient'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => _confirmLogout(context),
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_patient == null) {
+      return Scaffold(
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: _buildEmptyState(context),
           ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: _loading
-            ? _buildLoadingState()
-            : (_patient == null ? _buildEmptyState(context) : _buildPatientOverview(context)),
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () async {
+            final refresh = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(builder: (_) => const PatientDetailScreen()),
+            );
+            if (refresh == true) {
+              _loadPatient();
+            }
+          },
+          child: const Icon(Icons.add),
+        ),
+      );
+    }
+
+    final patientId = _patient?['id'] as int;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Row(
+          children: [
+            _buildSidebar(context, patientId),
+            Expanded(child: _buildDashboardContent(context)),
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
@@ -117,23 +118,296 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
             _loadPatient();
           }
         },
-        child: Icon(_patient == null ? Icons.add : Icons.edit),
+        child: const Icon(Icons.edit),
       ),
     );
   }
 
-  Widget _buildLoadingState() {
-    return Column(
-      children: List.generate(
-        3,
-        (_) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Container(
-            height: 100,
+  Widget _buildSidebar(BuildContext context, int patientId) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: _sidebarExpanded ? 210 : 76,
+      color: const Color(0xFF111827),
+      child: Column(
+        children: [
+          const SizedBox(height: 18),
+          _buildSidebarToggle(context),
+          const SizedBox(height: 26),
+          _sidebarItem(
+            icon: Icons.dashboard,
+            label: 'Dashboard',
+            onTap: () {},
+          ),
+          const SizedBox(height: 18),
+          _sidebarItem(
+            icon: Icons.group,
+            label: 'Known people',
+            onTap: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => KnownPersonListScreen(patientId: patientId)));
+            },
+          ),
+          const SizedBox(height: 18),
+          _sidebarItem(
+            icon: Icons.history,
+            label: 'History',
+            onTap: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => HistoryDashboardScreen(patientId: patientId)));
+            },
+          ),
+          const SizedBox(height: 18),
+          _sidebarItem(
+            icon: Icons.location_on,
+            label: 'Safe Zone',
+            onTap: () async {
+              final saved = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(builder: (_) => SafeZoneScreen(patientId: patientId)),
+              );
+              if (saved == true) {
+                _loadPatient();
+              }
+            },
+          ),
+          const Spacer(),
+          _sidebarItem(
+            icon: Icons.logout,
+            label: 'Log out',
+            onTap: () => _confirmLogout(context),
+          ),
+          const SizedBox(height: 18),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidebarToggle(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _sidebarExpanded = !_sidebarExpanded;
+        });
+      },
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: 54,
+        height: 54,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1F2937),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Transform.rotate(
+          angle: _sidebarExpanded ? 3.14 : 0,
+          child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+        ),
+      ),
+    );
+  }
+
+  Widget _sidebarItem({required IconData icon, required String label, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        width: double.infinity,
+        height: 54,
+        padding: EdgeInsets.symmetric(horizontal: _sidebarExpanded ? 16 : 0),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1F2937),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          mainAxisAlignment: _sidebarExpanded ? MainAxisAlignment.start : MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 26),
+            if (_sidebarExpanded) ...[
+              const SizedBox(width: 12),
+              Expanded(child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600))),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainCard(BuildContext context, String name, String birthdayText) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 56,
+            height: 56,
             decoration: BoxDecoration(
-              color: Colors.grey.shade300,
+              color: const Color(0xFF1F2937),
               borderRadius: BorderRadius.circular(16),
             ),
+            child: Center(
+              child: Text(
+                name.isNotEmpty ? name.split(' ').where((word) => word.isNotEmpty).take(2).map((word) => word[0]).join() : 'P',
+                style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text(birthdayText, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: () {},
+            icon: const Icon(Icons.edit, color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatTile({required String title, required String value, required Color background, required Color valueColor}) {
+    return Container(
+      width: 170,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(color: valueColor.withAlpha(230), fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 18),
+          Text(value, style: TextStyle(color: valueColor, fontSize: 34, fontWeight: FontWeight.w900)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDashboardContent(BuildContext context) {
+    final name = _patient?['name'] as String? ?? 'Patient';
+    final age = _patient?['age'] as int?;
+    final birthdayText = age != null ? 'Age $age' : _formatBirthday(_patient?['date_of_birth'] as String?, _patient?['age']);
+    final summary = _summary ?? <String, dynamic>{};
+    final today = summary['today'] as Map<String, dynamic>? ?? <String, dynamic>{};
+    final weeklyCounts = (summary['weekly_counts'] as List<dynamic>?) ?? <dynamic>[];
+
+    return Container(
+      color: const Color(0xFF0A0F1D),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 26.0, vertical: 24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Dashboard', style: TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              const Text('Overview of the patient’s detection activity', style: TextStyle(color: Colors.white70, fontSize: 14)),
+              const SizedBox(height: 24),
+              _buildMainCard(context, name, birthdayText),
+              const SizedBox(height: 22),
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  _buildStatTile(
+                    title: 'Known people',
+                    value: '${today['known_detections'] ?? 0}',
+                    background: const Color(0xFF064E3B),
+                    valueColor: const Color(0xFF6EE7B7),
+                  ),
+                  _buildStatTile(
+                    title: 'Unknown',
+                    value: '${today['unknown_detections'] ?? 0}',
+                    background: const Color(0xFF78350F),
+                    valueColor: const Color(0xFFFBCF3F),
+                  ),
+                  _buildStatTile(
+                    title: 'Conversations saved',
+                    value: '${summary['conversations_saved'] ?? 0}',
+                    background: const Color(0xFF111827),
+                    valueColor: Colors.white,
+                  ),
+                  _buildStatTile(
+                    title: 'Avg. match confidence',
+                    value: '${summary['average_match_confidence']?.toStringAsFixed(0) ?? '0'}%',
+                    background: const Color(0xFF111827),
+                    valueColor: Colors.white,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 28),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111827),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text('Detections this week', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                        ),
+                        Text('View all', style: TextStyle(color: Colors.white.withAlpha(179), fontSize: 13)),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      height: 220,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: weeklyCounts.isEmpty
+                            ? [
+                                Expanded(
+                                  child: Center(
+                                    child: Text('No detections yet', style: TextStyle(color: Colors.grey.shade500)),
+                                  ),
+                                )
+                              ]
+                            : weeklyCounts.map((entry) {
+                                final item = entry as Map<String, dynamic>;
+                                final label = item['day'] as String? ?? '';
+                                final count = (item['count'] as num?)?.toDouble() ?? 0;
+                                final height = 28.0 + (count * 16).clamp(0.0, 150.0);
+                                return Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        Container(
+                                          height: height,
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF10B981),
+                                            borderRadius: BorderRadius.circular(18),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+                                        const SizedBox(height: 6),
+                                        Text(count.toString(), style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -142,162 +416,24 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
 
   Widget _buildEmptyState(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Card(
-          color: Theme.of(context).cardColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32.0, horizontal: 24.0),
-            child: Column(
-              children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Theme.of(context).colorScheme.primary.withAlpha(36),
-                  ),
-                  child: Icon(Icons.person_add_alt_1, size: 36, color: Theme.of(context).colorScheme.primary),
-                ),
-                const SizedBox(height: 20),
-                const Text('Add patient details', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                const Text(
-                  'Name, date of birth, and a live face scan',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.black54),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () async {
-                    final refresh = await Navigator.of(context).push<bool>(
-                      MaterialPageRoute(builder: (_) => const PatientDetailScreen()),
-                    );
-                    if (refresh == true) {
-                      _loadPatient();
-                    }
-                  },
-                  child: const Text('Add patient details'),
-                ),
-              ],
-            ),
-          ),
-        ),
+        const Text('Add patient details', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 10),
+        const Text('Name, date of birth, and a live face scan', style: TextStyle(color: Colors.black54)),
         const SizedBox(height: 24),
-        _buildDisabledLink(context, Icons.group, 'Known People'),
-        const SizedBox(height: 12),
-        _buildDisabledLink(context, Icons.history, 'History'),
-        const SizedBox(height: 12),
-        _buildDisabledLink(context, Icons.location_on, 'Set Limit'),
-      ],
-    );
-  }
-
-  Widget _buildPatientOverview(BuildContext context) {
-    final name = _patient?['name'] as String? ?? 'Unknown';
-    final dateOfBirth = _patient?['date_of_birth'] as String?;
-    final age = _patient?['age'];
-    final birthdayText = _formatBirthday(dateOfBirth, age);
-    final safeZoneText = _safeZoneLabel ?? 'Set limit';
-    final patientId = _patient?['id'] as int;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Card(
-          color: Theme.of(context).cardColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 32.0, horizontal: 24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  child: Text(
-                    name.isNotEmpty ? name.split(' ').map((word) => word.isNotEmpty ? word[0] : '').take(2).join() : 'P',
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Text(name, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text(birthdayText, style: const TextStyle(color: Colors.black54)),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 24),
-        _buildOverviewLink(
-          context,
-          icon: Icons.group,
-          label: 'Known People',
-          value: '$_knownPeopleCount people added',
-          onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => KnownPersonListScreen(patientId: patientId)));
-          },
-        ),
-        const SizedBox(height: 12),
-        _buildOverviewLink(
-          context,
-          icon: Icons.history,
-          label: 'History',
-          value: '$_historyCount entries this week',
-          onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(builder: (_) => HistoryDashboardScreen(patientId: patientId)));
-          },
-        ),
-        const SizedBox(height: 12),
-        _buildOverviewLink(
-          context,
-          icon: Icons.location_on,
-          label: 'Set Limit',
-          value: safeZoneText,
-          onTap: () async {
-            final saved = await Navigator.of(context).push<bool>(
-              MaterialPageRoute(builder: (_) => SafeZoneScreen(patientId: patientId)),
+        ElevatedButton(
+          onPressed: () async {
+            final refresh = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(builder: (_) => const PatientDetailScreen()),
             );
-            if (saved == true) {
+            if (refresh == true) {
               _loadPatient();
             }
           },
+          child: const Text('Add patient details'),
         ),
       ],
-    );
-  }
-
-  Widget _buildDisabledLink(BuildContext context, IconData icon, String label) {
-    return Card(
-      color: Theme.of(context).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: ListTile(
-        leading: Icon(icon, color: Colors.grey),
-        title: Text(label, style: const TextStyle(color: Color.fromARGB(115, 227, 224, 224), fontWeight: FontWeight.w600)),
-        trailing: const Icon(Icons.arrow_forward_ios, color: Colors.grey),
-      ),
-    );
-  }
-
-  Widget _buildOverviewLink(BuildContext context, {required IconData icon, required String label, required String value, required VoidCallback onTap}) {
-    return Card(
-      color: Theme.of(context).cardColor,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: ListTile(
-        leading: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary.withAlpha(32),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(icon, color: Theme.of(context).colorScheme.primary),
-        ),
-        title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
-        subtitle: Text(value, style: const TextStyle(color: Color.fromARGB(136, 53, 52, 52))),
-        trailing: const Icon(Icons.arrow_forward_ios),
-        onTap: onTap,
-      ),
     );
   }
 

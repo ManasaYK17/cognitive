@@ -56,7 +56,9 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
     final bytes = await captureResult.image!.readAsBytes();
+    debugPrint('[face_scan_screen] captured image bytes=${bytes.length} name=${captureResult.image!.name}');
     final result = await recognitionService.attemptPatientRecognitionFromBytes(bytes, captureResult.image!.name, 'phone_auto_capture');
+    debugPrint('[face_scan_screen] recognition result: $result');
 
     if (!mounted) return;
 

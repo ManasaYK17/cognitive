@@ -95,19 +95,16 @@ class IdentifyPatientView(views.APIView):
         else:
             session_token = None
 
-        RecognitionHistory.objects.create(
-            patient=best_patient if best_patient is not None else Patient.objects.first() or Patient.objects.create(
-                caregiver=None,
-                name='Unknown',
-                age=0,
-            ),
-            subject_type='patient',
-            content_type=ContentType.objects.get_for_model(Patient) if best_patient is not None else None,
-            object_id=patient_id,
-            source=request.data.get('source', 'phone_camera'),
-            confidence_score=best_confidence,
-            outcome='matched' if matched else 'not_matched',
-        )
+        if best_patient is not None:
+            RecognitionHistory.objects.create(
+                patient=best_patient,
+                subject_type='patient',
+                content_type=ContentType.objects.get_for_model(Patient),
+                object_id=patient_id,
+                source=request.data.get('source', 'phone_camera'),
+                confidence_score=best_confidence,
+                outcome='matched' if matched else 'not_matched',
+            )
 
         response_payload = {
             'match': matched,

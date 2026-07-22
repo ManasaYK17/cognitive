@@ -16,6 +16,25 @@ class CaregiverRegisterView(generics.CreateAPIView):
     serializer_class = CaregiverRegistrationSerializer
     permission_classes = [permissions.AllowAny]
 
+    def create(self, request, *args, **kwargs):
+        # Log incoming registration requests to a file so we can diagnose
+        # timeouts and confirm whether the backend receives the request.
+        try:
+            import os, json
+            log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, 'register_requests.log')
+            entry = {
+                'path': request.path,
+                'remote_addr': request.META.get('REMOTE_ADDR'),
+                'body': request.body.decode('utf-8', errors='replace'),
+            }
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry) + '\n')
+        except Exception:
+            pass
+        return super().create(request, *args, **kwargs)
+
 
 class CaregiverLoginView(APIView):
     permission_classes = [permissions.AllowAny]

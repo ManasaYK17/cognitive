@@ -1,0 +1,4 @@
+{"path": "/api/accounts/register/", "remote_addr": "10.65.179.33", "body": "{\"email\":\"meghakumarg@gmail.com\",\"first_name\":\"meghaa\",\"last_name\":\"\",\"password\":\"megha@2345\",\"password_confirm\":\"megha@2345\"}"}
+{"path": "/api/accounts/register/", "remote_addr": "10.65.179.33", "body": "{\"email\":\"meghakumarg@gmail.com\",\"first_name\":\"meghaa\",\"last_name\":\"\",\"password\":\"megha@2345\",\"password_confirm\":\"megha@2345\"}"}
+{"path": "/api/accounts/register/", "remote_addr": "10.65.179.137", "body": "{\"email\": \"probe_82bb7af4@example.com\", \"first_name\": \"Probe\", \"last_name\": \"Device\", \"password\": \"password123\", \"password_confirm\": \"password123\"}"}
+{"path": "/api/accounts/register/", "remote_addr": "10.65.179.33", "body": "{\"email\":\"meghakumar204@gmail.com\",\"first_name\":\"meghaa\",\"last_name\":\"\",\"password\":\"meghs6789\",\"password_confirm\":\"meghs6789\"}"}

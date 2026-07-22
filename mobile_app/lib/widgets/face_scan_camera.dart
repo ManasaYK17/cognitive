@@ -18,6 +18,19 @@ class FaceScanCamera extends StatefulWidget {
 
   final int timeoutSeconds;
 
+  static InputImageFormat? resolveInputImageFormatForTesting({required ImageFormatGroup group}) {
+    switch (group) {
+      case ImageFormatGroup.yuv420:
+        return InputImageFormat.nv21;
+      case ImageFormatGroup.nv21:
+        return InputImageFormat.nv21;
+      case ImageFormatGroup.bgra8888:
+        return InputImageFormat.bgra8888;
+      default:
+        return null;
+    }
+  }
+
   @override
   State<FaceScanCamera> createState() => _FaceScanCameraState();
 }
@@ -38,6 +51,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   bool _didCapture = false;
   late final AnimationController _scanController;
   Timer? _timeoutTimer;
+  Timer? _captureTimer;
 
   @override
   void initState() {
@@ -48,57 +62,83 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   }
 
   Future<void> _initializeCamera() async {
+    debugPrint('[face_scan] initializing camera');
     if (kIsWeb) {
+      debugPrint('[face_scan] camera unavailable on web');
       if (!mounted) return;
       Navigator.of(context).pop(const FaceScanCaptureResult(cancelled: true, message: 'Camera is not available on web.'));
       return;
     }
 
     final status = await Permission.camera.request();
+    debugPrint('[face_scan] camera permission status: ${status.toString()}');
     if (!status.isGranted) {
+      debugPrint('[face_scan] camera permission denied');
       if (!mounted) return;
       Navigator.of(context).pop(const FaceScanCaptureResult(cancelled: true, message: 'Camera permission is required.'));
       return;
     }
 
     final cameras = await availableCameras();
+    debugPrint('[face_scan] available cameras: ${cameras.length}');
     if (cameras.isEmpty) {
+      debugPrint('[face_scan] no camera available');
       if (!mounted) return;
       Navigator.of(context).pop(const FaceScanCaptureResult(cancelled: true, message: 'No camera is available.'));
       return;
     }
 
     final camera = cameras.firstWhere((item) => item.lensDirection == CameraLensDirection.front, orElse: () => cameras.first);
+    debugPrint('[face_scan] using camera: ${camera.name} (${camera.lensDirection.name})');
     _controller = CameraController(camera, ResolutionPreset.high, enableAudio: false);
     await _controller!.initialize();
-    await _controller!.startImageStream(_processCameraImage);
 
     _timeoutTimer = Timer(Duration(seconds: widget.timeoutSeconds), () {
       if (_didCapture || !mounted) return;
+      debugPrint('[face_scan] timeout reached without capture');
       _closeWithResult(const FaceScanCaptureResult(cancelled: true, message: "Couldn't find a face — try again"));
     });
+
+    _captureTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
+      unawaited(_attemptStillCaptureAndDetect());
+    });
+    unawaited(_attemptStillCaptureAndDetect());
 
     if (mounted) {
       setState(() => _isInitializing = false);
     }
   }
 
-  Future<void> _processCameraImage(CameraImage image) async {
-    if (_isCapturing || _didCapture || !_isScanning) return;
+  Future<void> _attemptStillCaptureAndDetect() async {
+    if (_isCapturing || _didCapture || !_isScanning || _controller == null || !_controller!.value.isInitialized) {
+      return;
+    }
 
     _isCapturing = true;
     try {
-      final inputImage = _createInputImage(image);
-      if (inputImage == null) {
+      debugPrint('[face_scan] attempting still-image capture for detection');
+      final imageFile = await _controller!.takePicture();
+      final inputImage = InputImage.fromFilePath(imageFile.path);
+      final faces = await _faceDetector.processImage(inputImage);
+      debugPrint('[face_scan] still-image detection completed with ${faces.length} face(s)');
+      final bestFace = _selectBestFace(faces);
+      if (bestFace != null) {
+        debugPrint('[face_scan] face detected from still image; capturing and closing');
+        _captureTimer?.cancel();
+        _timeoutTimer?.cancel();
+        _didCapture = true;
+        _isScanning = false;
+        if (!mounted) return;
+        setState(() {});
+        await Future.delayed(const Duration(milliseconds: 400));
+        if (!mounted) return;
+        _closeWithResult(FaceScanCaptureResult(image: imageFile));
         return;
       }
-      final faces = await _faceDetector.processImage(inputImage);
-      final bestFace = _selectBestFace(faces, image.width, image.height);
-      if (bestFace != null) {
-        await _captureAndClose();
-      }
-    } catch (_) {
-      // Ignore transient detection failures and keep scanning.
+      debugPrint('[face_scan] no face found in still image; continuing scan');
+    } catch (error, stackTrace) {
+      debugPrint('[face_scan] still-image detection exception: $error');
+      debugPrint(stackTrace.toString());
     } finally {
       if (!_didCapture) {
         _isCapturing = false;
@@ -106,74 +146,19 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
     }
   }
 
-  InputImage? _createInputImage(CameraImage image) {
-    try {
-      final format = _inputImageFormatFromCameraImage(image);
-      if (format == null) return null;
-
-      final bytes = Uint8List.fromList(image.planes.expand((plane) => plane.bytes).toList());
-      final metadata = InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: InputImageRotation.rotation0deg,
-        format: format,
-        bytesPerRow: image.planes.first.bytesPerRow,
-      );
-      return InputImage.fromBytes(bytes: bytes, metadata: metadata);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  InputImageFormat? _inputImageFormatFromCameraImage(CameraImage image) {
-    switch (image.format.group) {
-      case ImageFormatGroup.yuv420:
-      case ImageFormatGroup.nv21:
-        return InputImageFormat.nv21;
-      case ImageFormatGroup.bgra8888:
-        return InputImageFormat.bgra8888;
-      default:
-        return null;
-    }
-  }
-
-  Face? _selectBestFace(List<Face> faces, int width, int height) {
+  Face? _selectBestFace(List<Face> faces) {
     if (faces.isEmpty) return null;
 
-    final safeFaces = faces.where((face) {
-      final box = face.boundingBox;
-      final boxArea = box.width * box.height;
-      final frameArea = width * height.toDouble();
-      final isLargeEnough = boxArea / frameArea > 0.08;
-      final isCentered = box.left > width * 0.08 && box.right < width * 0.92 && box.top > height * 0.08 && box.bottom < height * 0.92;
-      return isLargeEnough && isCentered;
-    }).toList();
-
-    if (safeFaces.isEmpty) return null;
-    safeFaces.sort((a, b) {
+    // ML Kit returns bounds in the rotated image coordinate space. Avoid
+    // comparing them with the raw camera frame dimensions, which can reject
+    // valid faces on front cameras. The largest detected face is the subject.
+    final sortedFaces = List<Face>.of(faces);
+    sortedFaces.sort((a, b) {
       final aArea = a.boundingBox.width * a.boundingBox.height;
       final bArea = b.boundingBox.width * b.boundingBox.height;
       return bArea.compareTo(aArea);
     });
-    return safeFaces.first;
-  }
-
-  Future<void> _captureAndClose() async {
-    if (_didCapture || _controller == null || !_controller!.value.isInitialized) return;
-    _didCapture = true;
-    _isScanning = false;
-    _timeoutTimer?.cancel();
-
-    try {
-      final imageFile = await _controller!.takePicture();
-      if (!mounted) return;
-      setState(() {});
-      await Future.delayed(const Duration(milliseconds: 400));
-      if (!mounted) return;
-      _closeWithResult(FaceScanCaptureResult(image: imageFile));
-    } catch (_) {
-      if (!mounted) return;
-      _closeWithResult(const FaceScanCaptureResult(cancelled: true, message: 'Unable to capture the image.'));
-    }
+    return sortedFaces.first;
   }
 
   void _closeWithResult(FaceScanCaptureResult result) {
@@ -187,6 +172,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   @override
   void dispose() {
     _timeoutTimer?.cancel();
+    _captureTimer?.cancel();
     _scanController.dispose();
     _controller?.dispose();
     _faceDetector.close();

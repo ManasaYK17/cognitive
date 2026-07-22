@@ -6,7 +6,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
-import '../services/recognition_service.dart';
 import '../theme/design_tokens.dart';
 import '../widgets/face_scan_camera.dart';
 import 'patient_mode_screen.dart';

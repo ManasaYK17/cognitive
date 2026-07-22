@@ -107,11 +107,13 @@ class RecognitionService extends ChangeNotifier {
   Future<Map<String, dynamic>?> attemptPatientRecognitionFromBytes(Uint8List bytes, String filename, String source) async {
     try {
       final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-patient/');
+      debugPrint('[recognition_service] posting patient recognition bytes=${bytes.length} filename=$filename source=$source to $uri');
       final request = http.MultipartRequest('POST', uri);
       request.fields['source'] = source;
       request.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
+      debugPrint('[recognition_service] response status=${response.statusCode} body=${response.body}');
       if (response.statusCode != 200) return null;
       final payload = json.decode(response.body) as Map<String, dynamic>;
       // populate local state so callers can rely on RecognitionService state
@@ -120,7 +122,9 @@ class RecognitionService extends ChangeNotifier {
       recognizedPerson = payload;
       notifyListeners();
       return payload;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('[recognition_service] recognition upload failed: $error');
+      debugPrint(stackTrace.toString());
       return null;
     }
   }
