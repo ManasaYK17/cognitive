@@ -29,6 +29,7 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
   bool _loading = false;
   List<XFile> _images = [];
   List<Uint8List> _imageBytes = [];
+  String? _existingFaceUrl;
 
   final ApiClient _api = ApiClient();
 
@@ -52,34 +53,13 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
       _phoneController.text = data['phone_number'] as String? ?? '';
       _addressController.text = data['address'] as String? ?? '';
       _notesController.text = data['notes'] as String? ?? '';
+      _existingFaceUrl = data['face_image'] as String?;
     }
     setState(() => _loading = false);
   }
 
-  Future<void> _pickImages() async {
-    final images = await ImagePicker().pickMultiImage(imageQuality: 80);
-    if (images.isNotEmpty) {
-      final bytes = await Future.wait(images.map((image) => image.readAsBytes()));
-      setState(() {
-        _images = images;
-        _imageBytes = bytes;
-      });
-    }
-  }
-
   Future<void> _scanFace() async {
     try {
-      if (kIsWeb) {
-        final image = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80);
-        if (image == null) return;
-        final bytes = await image.readAsBytes();
-        setState(() {
-          _images.add(image);
-          _imageBytes.add(bytes);
-        });
-        return;
-      }
-
       final result = await Navigator.of(context).push<FaceScanCaptureResult>(
         MaterialPageRoute(builder: (_) => const FaceScanCamera()),
       );
@@ -134,11 +114,16 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
       }
     }
 
-    if (_images.isNotEmpty) {
-      final uploaded = await _uploadImages(personId, token);
-      if (!uploaded) {
-        _showError('Known person saved, but image upload failed.');
-      }
+    // For new contacts, require at least one scanned face. For edits, existing face may suffice.
+    if (widget.personId == null && _images.isEmpty) {
+      _showError('Please scan the person’s face before saving.');
+      setState(() => _loading = false);
+      return;
+    }
+
+    final uploaded = _images.isNotEmpty ? await _uploadImages(personId, token) : true;
+    if (!uploaded) {
+      _showError('Known person saved, but face upload failed.');
     }
 
     if (!mounted) return;
@@ -215,14 +200,6 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
                             label: const Text('Scan face'),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _pickImages,
-                            icon: const Icon(Icons.photo_library_outlined),
-                            label: const Text('Upload photos'),
-                          ),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 10),
@@ -244,8 +221,28 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text('${_images.length} of 10 minimum photos', style: const TextStyle(color: Colors.amber)),
+                          Text('${_images.length} scanned face image(s) attached', style: const TextStyle(color: Colors.green)),
                         ],
+                      )
+                    else if (_existingFaceUrl != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Image.network(
+                            _existingFaceUrl!,
+                            width: 120,
+                            height: 120,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text('Existing scanned face attached', style: TextStyle(color: Colors.grey)),
+                        ],
+                      )
+                    else
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Text('Scan at least one face before saving this contact.', style: TextStyle(color: Colors.grey)),
                       ),
                     const SizedBox(height: 30),
                     ElevatedButton(onPressed: _save, child: const Text('Save Contact')),

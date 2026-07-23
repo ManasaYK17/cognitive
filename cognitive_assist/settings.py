@@ -137,3 +137,7 @@ STATIC_URL = '/static/'
 
 # Allow local dev origins
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Media files (uploaded face images)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
