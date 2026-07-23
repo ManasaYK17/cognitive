@@ -110,6 +110,7 @@ class RecognitionEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['id'], self.known_person.id)
+        self.assertEqual(response.data.get('relationship'), self.known_person.relationship)
         self.assertTrue(RecognitionHistory.objects.filter(patient=self.patient, subject=self.known_person, outcome='matched').exists())
 
     def test_identify_known_person_returns_no_match_when_no_known_people(self):

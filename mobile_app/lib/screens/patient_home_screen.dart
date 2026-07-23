@@ -106,6 +106,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
     final knownPersonId = payload['id'] as int? ?? 0;
     final knownPersonName = payload['name'] as String? ?? 'Person';
+    final knownPersonRelationship = payload['relationship'] as String?;
 
     navigator.push(
       MaterialPageRoute(
@@ -113,6 +114,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           patientId: widget.patientId,
           knownPersonId: knownPersonId,
           knownPersonName: knownPersonName,
+          knownPersonRelationship: knownPersonRelationship,
           sessionToken: widget.sessionToken,
         ),
       ),

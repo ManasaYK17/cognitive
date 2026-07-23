@@ -11,12 +11,14 @@ class PatientRecognitionResultScreen extends StatefulWidget {
   final int patientId;
   final int knownPersonId;
   final String knownPersonName;
+  final String? knownPersonRelationship;
   final String sessionToken;
 
   const PatientRecognitionResultScreen({
     required this.patientId,
     required this.knownPersonId,
     required this.knownPersonName,
+    this.knownPersonRelationship,
     required this.sessionToken,
     super.key,
   });
@@ -71,9 +73,12 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   }
 
   Future<void> _speakSummary() async {
+    final relationshipLabel = widget.knownPersonRelationship?.trim().isNotEmpty == true
+        ? ' your ${widget.knownPersonRelationship}'
+        : '';
     final speakText = _lastSummary?.trim().isNotEmpty == true
-        ? 'Recognized ${widget.knownPersonName}. Last summary: ${_lastSummary!}. Please speak when ready and the app will capture your conversation.'
-        : 'Recognized ${widget.knownPersonName}. Please speak when ready and the app will capture your conversation.';
+        ? 'Recognized ${widget.knownPersonName}$relationshipLabel. Last summary: ${_lastSummary!}. Please speak when ready and the app will capture your conversation.'
+        : 'Recognized ${widget.knownPersonName}$relationshipLabel. Please speak when ready and the app will capture your conversation.';
 
     setState(() {
       _statusMessage = 'Speaking last summary...';
@@ -185,13 +190,19 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(widget.knownPersonName, style: Theme.of(context).textTheme.titleLarge),
+                      if (widget.knownPersonRelationship?.trim().isNotEmpty == true) ...[
+                        const SizedBox(height: 8),
+                        Text('Relationship: ${widget.knownPersonRelationship}', style: Theme.of(context).textTheme.bodyMedium),
+                      ],
                       const SizedBox(height: 8),
                       Text('Conversation capture is active.', style: Theme.of(context).textTheme.bodyMedium),
+                      const SizedBox(height: 16),
                       if (_lastSummary != null) ...[
-                        const SizedBox(height: 16),
-                        const Text('Last summary', style: TextStyle(fontWeight: FontWeight.w600)),
+                        const Text('Last conversation', style: TextStyle(fontWeight: FontWeight.w600)),
                         const SizedBox(height: 8),
                         Text(_lastSummary!, style: const TextStyle(fontSize: 15, color: Colors.black87)),
+                      ] else ...[
+                        const Text('No previous conversation found.', style: TextStyle(fontSize: 15, color: Colors.black87)),
                       ],
                     ],
                   ),

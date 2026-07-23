@@ -207,6 +207,7 @@ class IdentifyKnownPersonView(views.APIView):
             'confidence': round(best_confidence, 4),
             'id': best_known_person.id if best_known_person is not None else None,
             'name': best_known_person.name if best_known_person is not None else None,
+            'relationship': best_known_person.relationship if best_known_person is not None else None,
             'patient_id': patient.id,
         }, status=status.HTTP_200_OK)
 
