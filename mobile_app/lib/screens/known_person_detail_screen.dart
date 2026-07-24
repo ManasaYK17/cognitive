@@ -12,10 +12,12 @@ class KnownPersonDetailScreen extends StatefulWidget {
   final int? personId;
   final int patientId;
 
-  const KnownPersonDetailScreen({this.personId, required this.patientId, super.key});
+  const KnownPersonDetailScreen(
+      {this.personId, required this.patientId, super.key});
 
   @override
-  State<KnownPersonDetailScreen> createState() => _KnownPersonDetailScreenState();
+  State<KnownPersonDetailScreen> createState() =>
+      _KnownPersonDetailScreenState();
 }
 
 class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
@@ -44,7 +46,8 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
   Future<void> _loadKnownPerson() async {
     setState(() => _loading = true);
     final token = Provider.of<AuthService>(context, listen: false).accessToken;
-    final response = await _api.get('/known-people/${widget.personId!}/', token: token);
+    final response =
+        await _api.get('/known-people/${widget.personId!}/', token: token);
     if (response.statusCode == 200) {
       final data = json.decode(response.body) as Map<String, dynamic>;
       _nameController.text = data['name'] as String? ?? '';
@@ -95,16 +98,19 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
 
     late final int personId;
     if (widget.personId == null) {
-      final response = await _api.post('/known-people/', body: data, token: token);
+      final response =
+          await _api.post('/known-people/', body: data, token: token);
       if (response.statusCode == 201) {
-        personId = (json.decode(response.body) as Map<String, dynamic>)['id'] as int;
+        personId =
+            (json.decode(response.body) as Map<String, dynamic>)['id'] as int;
       } else {
         _showError('Unable to create known person.');
         setState(() => _loading = false);
         return;
       }
     } else {
-      final response = await _api.put('/known-people/${widget.personId!}/', body: data, token: token);
+      final response = await _api.put('/known-people/${widget.personId!}/',
+          body: data, token: token);
       if (response.statusCode == 200) {
         personId = widget.personId!;
       } else {
@@ -114,14 +120,9 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
       }
     }
 
-    // For new contacts, require at least one scanned face. For edits, existing face may suffice.
-    if (widget.personId == null && _images.isEmpty) {
-      _showError('Please scan the person’s face before saving.');
-      setState(() => _loading = false);
-      return;
-    }
-
-    final uploaded = _images.isNotEmpty ? await _uploadImages(personId, token) : true;
+    // Face scan is optional on first save. It can be added later from the contact detail screen.
+    final uploaded =
+        _images.isNotEmpty ? await _uploadImages(personId, token) : true;
     if (!uploaded) {
       _showError('Known person saved, but face upload failed.');
     }
@@ -132,23 +133,29 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
 
   Future<bool> _uploadImages(int personId, String? token) async {
     if (token == null) return false;
-    final request = _api.multipartRequest('POST', '/known-people/$personId/face-images/', token: token);
+    final request = _api.multipartRequest(
+        'POST', '/known-people/$personId/face-images/',
+        token: token);
     for (final image in _images) {
       final bytes = await image.readAsBytes();
-      request.files.add(http.MultipartFile.fromBytes('files', bytes, filename: image.name));
+      request.files.add(
+          http.MultipartFile.fromBytes('files', bytes, filename: image.name));
     }
     final streamed = await request.send();
     return streamed.statusCode == 201 || streamed.statusCode == 200;
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.personId == null ? 'New Contact' : 'Edit Contact')),
+      appBar: AppBar(
+          title:
+              Text(widget.personId == null ? 'New Contact' : 'Edit Contact')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
@@ -160,17 +167,21 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
                     TextFormField(
                       controller: _nameController,
                       decoration: const InputDecoration(labelText: 'Name'),
-                      validator: (value) => value?.trim().isEmpty == true ? 'Name is required' : null,
+                      validator: (value) => value?.trim().isEmpty == true
+                          ? 'Name is required'
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _relationshipController,
-                      decoration: const InputDecoration(labelText: 'Relationship'),
+                      decoration:
+                          const InputDecoration(labelText: 'Relationship'),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
                       controller: _occupationController,
-                      decoration: const InputDecoration(labelText: 'Occupation'),
+                      decoration:
+                          const InputDecoration(labelText: 'Occupation'),
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -221,7 +232,9 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Text('${_images.length} scanned face image(s) attached', style: const TextStyle(color: Colors.green)),
+                          Text(
+                              '${_images.length} scanned face image(s) attached',
+                              style: const TextStyle(color: Colors.green)),
                         ],
                       )
                     else if (_existingFaceUrl != null)
@@ -233,19 +246,24 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
                             width: 120,
                             height: 120,
                             fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.broken_image),
                           ),
                           const SizedBox(height: 8),
-                          const Text('Existing scanned face attached', style: TextStyle(color: Colors.grey)),
+                          const Text('Existing scanned face attached',
+                              style: TextStyle(color: Colors.grey)),
                         ],
                       )
                     else
                       const Padding(
                         padding: EdgeInsets.only(top: 8),
-                        child: Text('Scan at least one face before saving this contact.', style: TextStyle(color: Colors.grey)),
+                        child: Text(
+                            'Face scan is optional. You can add one later.',
+                            style: TextStyle(color: Colors.grey)),
                       ),
                     const SizedBox(height: 30),
-                    ElevatedButton(onPressed: _save, child: const Text('Save Contact')),
+                    ElevatedButton(
+                        onPressed: _save, child: const Text('Save Contact')),
                   ],
                 ),
               ),

@@ -124,14 +124,29 @@ class IdentifyPatientView(views.APIView):
     def _coerce_image(image):
         if image is None:
             return None
-        if hasattr(image, 'read'):
+
+        file_obj = getattr(image, 'file', image)
+        if hasattr(file_obj, 'seek'):
             try:
-                image.seek(0)
+                file_obj.seek(0)
             except Exception:
                 pass
-            image_bytes = image.read()
-            if image_bytes:
-                return ContentFile(image_bytes, name=getattr(image, 'name', 'uploaded-image'))
+
+        image_bytes = None
+        if hasattr(file_obj, 'read'):
+            try:
+                image_bytes = file_obj.read()
+            except Exception:
+                image_bytes = None
+
+        if not image_bytes and hasattr(file_obj, 'getvalue'):
+            try:
+                image_bytes = file_obj.getvalue()
+            except Exception:
+                image_bytes = None
+
+        if image_bytes:
+            return ContentFile(image_bytes, name=getattr(image, 'name', 'uploaded-image'))
         return image
 
     @staticmethod
@@ -220,14 +235,29 @@ class IdentifyKnownPersonView(views.APIView):
     def _coerce_image(image):
         if image is None:
             return None
-        if hasattr(image, 'read'):
+
+        file_obj = getattr(image, 'file', image)
+        if hasattr(file_obj, 'seek'):
             try:
-                image.seek(0)
+                file_obj.seek(0)
             except Exception:
                 pass
-            image_bytes = image.read()
-            if image_bytes:
-                return ContentFile(image_bytes, name=getattr(image, 'name', 'uploaded-image'))
+
+        image_bytes = None
+        if hasattr(file_obj, 'read'):
+            try:
+                image_bytes = file_obj.read()
+            except Exception:
+                image_bytes = None
+
+        if not image_bytes and hasattr(file_obj, 'getvalue'):
+            try:
+                image_bytes = file_obj.getvalue()
+            except Exception:
+                image_bytes = None
+
+        if image_bytes:
+            return ContentFile(image_bytes, name=getattr(image, 'name', 'uploaded-image'))
         return image
 
     @staticmethod

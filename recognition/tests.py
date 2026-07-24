@@ -63,14 +63,16 @@ class RecognitionEndpointTests(APITestCase):
         self.patient = Patient.objects.create(caregiver=self.caregiver, name='Rina', age=60, medical_notes='Needs recognition')
         self.known_person = KnownPerson.objects.create(patient=self.patient, name='Mina', relationship='Daughter')
         self.device_id = 'device-123'
-        self.image = self._make_image()
-        self.patient_face_image = FaceImage.objects.create(subject_type='patient', patient_subject=self.patient, image=self.image)
+        self.patient_image = self._make_image()
+        self.known_person_image = self._make_image()
+        self.patient_face_image = FaceImage.objects.create(subject_type='patient', patient_subject=self.patient, image=self.patient_image)
         self.known_person_face_image = FaceImage.objects.create(
             subject_type='known_person',
-            image=self.image,
+            image=self.known_person_image,
             object_id=self.known_person.id,
             content_type=ContentType.objects.get_for_model(self.known_person),
         )
+        self.image = self._make_image()
 
     def _make_image(self, size=(120, 120), color=(255, 0, 0), with_face=True):
         image = Image.new('RGB', size, color)
@@ -82,7 +84,7 @@ class RecognitionEndpointTests(APITestCase):
         return SimpleUploadedFile('face.jpg', buffer.getvalue(), content_type='image/jpeg')
 
     def test_identify_patient_returns_session_token_and_logs_history(self):
-        response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
+        response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['patient_id'], self.patient.id)
@@ -100,11 +102,11 @@ class RecognitionEndpointTests(APITestCase):
         self.assertIn('patient_session_token', response.data)
 
     def test_identify_known_person_requires_patient_session_token(self):
-        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
         response = self.client.post(
             reverse('identify-known-person'),
-            {'image': self.image, 'patient_id': self.patient.id, 'source': 'phone_camera'},
+            {'image': self._make_image(), 'patient_id': self.patient.id, 'source': 'phone_camera'},
             format='multipart',
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -115,11 +117,11 @@ class RecognitionEndpointTests(APITestCase):
 
     def test_identify_known_person_returns_no_match_when_no_known_people(self):
         self.known_person.delete()
-        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
         response = self.client.post(
             reverse('identify-known-person'),
-            {'image': self.image, 'source': 'phone_camera'},
+            {'image': self._make_image(), 'source': 'phone_camera'},
             format='multipart',
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)

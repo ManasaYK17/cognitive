@@ -3,6 +3,7 @@ from datetime import timedelta
 from django.db import models
 from django.db.models import Count, Q
 from django.utils import timezone
+from django.db import transaction
 from rest_framework import generics, permissions, status, views
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -12,6 +13,7 @@ from .permissions import IsCaregiverOwner
 from conversations.models import ConversationHistory
 from geofencing.models import LocationPing, SafeZone
 from history.models import RecognitionHistory
+from recognition.services import detect_face, generate_encoding
 
 
 class CaregiverPatientView(views.APIView):
@@ -161,9 +163,15 @@ class PatientFaceImageView(generics.CreateAPIView):
         if len(files) < 1:
             return Response({'detail': 'At least one face image is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        FaceImage.objects.filter(patient_subject=patient).delete()
+        existing_face_images = list(FaceImage.objects.filter(patient_subject=patient))
         created_images = []
+
         for image_file in files:
             face_image = FaceImage.objects.create(subject_type='patient', patient_subject=patient, image=image_file)
             created_images.append(FaceImageSerializer(face_image).data)
+
+        if created_images:
+            for old_face in existing_face_images:
+                old_face.delete()
+
         return Response(created_images, status=status.HTTP_201_CREATED)

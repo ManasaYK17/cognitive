@@ -49,6 +49,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   bool _isScanning = true;
   bool _isCapturing = false;
   bool _didCapture = false;
+  bool _isClosed = false;
   late final AnimationController _scanController;
   Timer? _timeoutTimer;
   Timer? _captureTimer;
@@ -110,7 +111,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   }
 
   Future<void> _attemptStillCaptureAndDetect() async {
-    if (_isCapturing || _didCapture || !_isScanning || _controller == null || !_controller!.value.isInitialized) {
+    if (!mounted || _isCapturing || _didCapture || !_isScanning || _isClosed || _controller == null || !_controller!.value.isInitialized) {
       return;
     }
 
@@ -118,6 +119,10 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
     try {
       debugPrint('[face_scan] attempting still-image capture for detection');
       final imageFile = await _controller!.takePicture();
+      if (imageFile == null) {
+        debugPrint('[face_scan] takePicture returned null');
+        return;
+      }
       final inputImage = InputImage.fromFilePath(imageFile.path);
       final faces = await _faceDetector.processImage(inputImage);
       debugPrint('[face_scan] still-image detection completed with ${faces.length} face(s)');
@@ -162,10 +167,13 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   }
 
   void _closeWithResult(FaceScanCaptureResult result) {
-    if (!mounted) return;
+    if (!mounted || _isClosed) return;
+    _isClosed = true;
     _timeoutTimer?.cancel();
+    _captureTimer?.cancel();
     _scanController.stop();
     _controller?.dispose();
+    _controller = null;
     Navigator.of(context).pop(result);
   }
 
