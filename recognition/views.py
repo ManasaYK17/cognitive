@@ -55,6 +55,33 @@ class IdentifyPatientView(views.APIView):
     permission_classes = [AllowAny]
     throttle_classes = [DeviceScopedRateThrottle]
 
+    @staticmethod
+    def _ensure_face_encodings(subject):
+        if subject is None:
+            return
+
+        if isinstance(subject, Patient):
+            face_images = FaceImage.objects.filter(patient_subject=subject)
+        else:
+            content_type = ContentType.objects.get_for_model(subject.__class__)
+            face_images = FaceImage.objects.filter(content_type=content_type, object_id=subject.id)
+
+        for face_image in face_images:
+            if FaceEncoding.objects.filter(face_image=face_image).exists():
+                continue
+            try:
+                face_location = detect_face(face_image.image)
+                encoding = generate_encoding(face_image.image, face_location)
+            except Exception:
+                continue
+            FaceEncoding.objects.create(
+                subject_type=face_image.subject_type,
+                content_type=face_image.content_type,
+                object_id=face_image.object_id,
+                face_image=face_image,
+                encoding=encoding,
+            )
+
     def post(self, request, *args, **kwargs):
         image = request.FILES.get('image')
         if not image:
@@ -72,7 +99,8 @@ class IdentifyPatientView(views.APIView):
         best_patient = None
         best_confidence = 0.0
 
-        for patient in Patient.objects.filter(face_images__encoding__isnull=False).distinct():
+        for patient in Patient.objects.filter(face_images__isnull=False).distinct():
+            self._ensure_face_encodings(patient)
             patient_encodings = FaceEncoding.objects.filter(face_image__patient_subject=patient)
             for face_encoding in patient_encodings:
                 confidence = self._similarity_score(encoding, face_encoding.encoding)
@@ -165,6 +193,33 @@ class IdentifyKnownPersonView(views.APIView):
     permission_classes = [AllowAny]
     throttle_classes = [DeviceScopedRateThrottle]
 
+    @staticmethod
+    def _ensure_face_encodings(subject):
+        if subject is None:
+            return
+
+        if isinstance(subject, Patient):
+            face_images = FaceImage.objects.filter(patient_subject=subject)
+        else:
+            content_type = ContentType.objects.get_for_model(subject.__class__)
+            face_images = FaceImage.objects.filter(content_type=content_type, object_id=subject.id)
+
+        for face_image in face_images:
+            if FaceEncoding.objects.filter(face_image=face_image).exists():
+                continue
+            try:
+                face_location = detect_face(face_image.image)
+                encoding = generate_encoding(face_image.image, face_location)
+            except Exception:
+                continue
+            FaceEncoding.objects.create(
+                subject_type=face_image.subject_type,
+                content_type=face_image.content_type,
+                object_id=face_image.object_id,
+                face_image=face_image,
+                encoding=encoding,
+            )
+
     def post(self, request, *args, **kwargs):
         image = request.FILES.get('image')
         if not image:
@@ -193,11 +248,12 @@ class IdentifyKnownPersonView(views.APIView):
         except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.7)
+        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.45)
         best_known_person = None
         best_confidence = 0.0
 
         for known_person in KnownPerson.objects.filter(patient=patient):
+            self._ensure_face_encodings(known_person)
             patient_encodings = FaceEncoding.objects.filter(face_image__content_type=ContentType.objects.get_for_model(known_person), face_image__object_id=known_person.id)
             for face_encoding in patient_encodings:
                 confidence = self._similarity_score(encoding, face_encoding.encoding)

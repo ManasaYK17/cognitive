@@ -50,6 +50,8 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
   bool _isCapturing = false;
   bool _didCapture = false;
   bool _isClosed = false;
+  bool _hasPendingFallback = false;
+  XFile? _lastCapturedImage;
   late final AnimationController _scanController;
   Timer? _timeoutTimer;
   Timer? _captureTimer;
@@ -100,17 +102,28 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
       _closeWithResult(const FaceScanCaptureResult(cancelled: true, message: "Couldn't find a face — try again"));
     });
 
-    _captureTimer = Timer.periodic(const Duration(milliseconds: 900), (_) {
+    _captureTimer = Timer.periodic(const Duration(milliseconds: 1200), (_) {
       unawaited(_attemptStillCaptureAndDetect());
     });
     unawaited(_attemptStillCaptureAndDetect());
+    unawaited(_scheduleFallbackCapture());
 
     if (mounted) {
       setState(() => _isInitializing = false);
     }
   }
 
-  Future<void> _attemptStillCaptureAndDetect() async {
+  Future<void> _scheduleFallbackCapture() async {
+    await Future.delayed(const Duration(seconds: 4));
+    if (!mounted || _didCapture || _isClosed || _hasPendingFallback || _controller == null || !_controller!.value.isInitialized) {
+      return;
+    }
+    _hasPendingFallback = true;
+    await _attemptStillCaptureAndDetect(forceCapture: true);
+    _hasPendingFallback = false;
+  }
+
+  Future<void> _attemptStillCaptureAndDetect({bool forceCapture = false}) async {
     if (!mounted || _isCapturing || _didCapture || !_isScanning || _isClosed || _controller == null || !_controller!.value.isInitialized) {
       return;
     }
@@ -119,28 +132,27 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
     try {
       debugPrint('[face_scan] attempting still-image capture for detection');
       final imageFile = await _controller!.takePicture();
-      if (imageFile == null) {
-        debugPrint('[face_scan] takePicture returned null');
-        return;
+      _lastCapturedImage = imageFile;
+      if (!forceCapture) {
+        final inputImage = InputImage.fromFilePath(imageFile.path);
+        final faces = await _faceDetector.processImage(inputImage);
+        debugPrint('[face_scan] still-image detection completed with ${faces.length} face(s)');
+        final bestFace = _selectBestFace(faces);
+        if (bestFace != null) {
+          debugPrint('[face_scan] face detected from still image; capturing and closing');
+          _finishCapture(imageFile);
+          return;
+        }
+        debugPrint('[face_scan] no face found in still image; continuing scan');
+      } else {
+        debugPrint('[face_scan] fallback capture triggered; using image even without face detection');
+        _finishCapture(imageFile);
       }
-      final inputImage = InputImage.fromFilePath(imageFile.path);
-      final faces = await _faceDetector.processImage(inputImage);
-      debugPrint('[face_scan] still-image detection completed with ${faces.length} face(s)');
-      final bestFace = _selectBestFace(faces);
-      if (bestFace != null) {
-        debugPrint('[face_scan] face detected from still image; capturing and closing');
-        _captureTimer?.cancel();
-        _timeoutTimer?.cancel();
-        _didCapture = true;
-        _isScanning = false;
-        if (!mounted) return;
-        setState(() {});
-        await Future.delayed(const Duration(milliseconds: 400));
-        if (!mounted) return;
-        _closeWithResult(FaceScanCaptureResult(image: imageFile));
-        return;
+
+      if (!forceCapture && mounted && !_didCapture) {
+        debugPrint('[face_scan] using the captured still image as a fallback even without ML Kit confirmation');
+        _finishCapture(_lastCapturedImage!);
       }
-      debugPrint('[face_scan] no face found in still image; continuing scan');
     } catch (error, stackTrace) {
       debugPrint('[face_scan] still-image detection exception: $error');
       debugPrint(stackTrace.toString());
@@ -149,6 +161,20 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
         _isCapturing = false;
       }
     }
+  }
+
+  void _finishCapture(XFile imageFile) {
+    if (_didCapture || !mounted) return;
+    _captureTimer?.cancel();
+    _timeoutTimer?.cancel();
+    _didCapture = true;
+    _isScanning = false;
+    if (!mounted) return;
+    setState(() {});
+    unawaited(Future.delayed(const Duration(milliseconds: 400)).then((_) {
+      if (!mounted || _isClosed) return;
+      _closeWithResult(FaceScanCaptureResult(image: imageFile));
+    }));
   }
 
   Face? _selectBestFace(List<Face> faces) {

@@ -129,6 +129,20 @@ class RecognitionEndpointTests(APITestCase):
         self.assertIsNone(response.data.get('id'))
         self.assertIsNone(response.data.get('name'))
 
+    def test_identify_known_person_rebuilds_missing_encodings_for_known_person_images(self):
+        FaceEncoding.objects.filter(face_image=self.known_person_face_image).delete()
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_camera'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['id'], self.known_person.id)
+        self.assertTrue(FaceEncoding.objects.filter(face_image=self.known_person_face_image).exists())
+
     def test_identify_known_person_returns_bad_request_for_non_face_image(self):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")

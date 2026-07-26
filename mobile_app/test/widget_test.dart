@@ -5,17 +5,25 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:cognitive_assist_app/services/api_client.dart';
 import 'package:cognitive_assist_app/main.dart';
 
 void main() {
   testWidgets('App shows initial screen', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
     await tester.pumpWidget(const CognitiveAssistApp());
+    expect(find.text('Checking who\'s here...'), findsOneWidget);
+  });
 
-    // Verify that the app launches to the initial loading state.
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+  test('api client expands fallback hosts', () {
+    final candidates = ApiClient.getCandidateBaseUrls(
+      apiHost: '127.0.0.1:8000',
+      apiHostFallback: '10.0.2.2:8000',
+    );
+
+    expect(candidates, containsAll(<String>[
+      'http://127.0.0.1:8000',
+      'http://10.0.2.2:8000',
+    ]));
   });
 }

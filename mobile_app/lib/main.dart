@@ -28,8 +28,9 @@ class CognitiveAssistApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'Cognitive Assist',
-        theme: DesignTokens.lightTheme(),
+        theme: DesignTokens.darkTheme(),
         darkTheme: DesignTokens.darkTheme(),
+        themeMode: ThemeMode.dark,
         debugShowCheckedModeBanner: false,
         home: const FaceScanScreen(),
       ),

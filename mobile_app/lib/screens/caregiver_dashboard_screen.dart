@@ -534,14 +534,14 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                   _buildMetricCard(
                     title: 'Conversations saved',
                     value: '${summary['conversations_saved'] ?? 0}',
-                    background: const Color(0xFF111827),
-                    valueColor: Colors.white,
+                    background: const Color.fromARGB(255, 98, 10, 70),
+                    valueColor: const Color.fromARGB(255, 236, 128, 195),
                   ),
                   _buildMetricCard(
                     title: 'Avg confidence',
                     value:
                         '${summary['average_match_confidence']?.toStringAsFixed(0) ?? '0'}%',
-                    background: const Color(0xFF111827),
+                    background: const Color.fromARGB(255, 36, 51, 84),
                     valueColor: Colors.white,
                   ),
                 ],

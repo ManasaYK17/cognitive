@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/location_service.dart';
@@ -26,6 +27,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   bool _scanning = false;
   bool _loadingMemories = true;
   List<dynamic> _recentMemories = [];
+  final FlutterTts _flutterTts = FlutterTts();
 
   @override
   void initState() {
@@ -33,9 +35,23 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
     recognitionService.clearRecognizedPerson();
     _loadRecentMemories();
+    unawaited(_initializeTts());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prepareLocationReporting();
     });
+  }
+
+  Future<void> _initializeTts() async {
+    try {
+      await _flutterTts.awaitSpeakCompletion(true);
+    } catch (_) {}
+  }
+
+  Future<void> _announceMessage(String message) async {
+    if (message.trim().isEmpty) return;
+    try {
+      await _flutterTts.speak(message);
+    } catch (_) {}
   }
 
   Future<void> _loadRecentMemories() async {
@@ -96,10 +112,11 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
       'phone_auto_capture',
       sessionTokenOverride: widget.sessionToken,
     );
-    if (payload == null || payload['match'] != true || recognitionService.sessionToken == null || payload['id'] == null) {
-      recognitionService.clearRecognizedPerson();
+    if (payload == null || payload['id'] == null) {
+      final message = 'Unknown person detected';
+      await _announceMessage(message);
       messenger.showSnackBar(
-        const SnackBar(content: Text('No matching person was detected. Please try again.')),
+        const SnackBar(content: Text('Unknown person detected. Please try again.')),
       );
       return;
     }
@@ -107,17 +124,25 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final knownPersonId = payload['id'] as int? ?? 0;
     final knownPersonName = payload['name'] as String? ?? 'Person';
     final knownPersonRelationship = payload['relationship'] as String?;
-
-    navigator.push(
-      MaterialPageRoute(
-        builder: (_) => PatientRecognitionResultScreen(
-          patientId: widget.patientId,
-          knownPersonId: knownPersonId,
-          knownPersonName: knownPersonName,
-          knownPersonRelationship: knownPersonRelationship,
-          sessionToken: widget.sessionToken,
+    if (payload['match'] == true) {
+      await _announceMessage('Recognized $knownPersonName');
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => PatientRecognitionResultScreen(
+            patientId: widget.patientId,
+            knownPersonId: knownPersonId,
+            knownPersonName: knownPersonName,
+            knownPersonRelationship: knownPersonRelationship,
+            sessionToken: widget.sessionToken,
+          ),
         ),
-      ),
+      );
+      return;
+    }
+
+    await _announceMessage('Unknown person detected');
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Unknown person detected. Please try again.')),
     );
   }
 
@@ -125,7 +150,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     if (_recentMemories.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 16.0),
-        child: Text('No recent memories yet.', style: TextStyle(color: DesignTokens.textSecondary)),
+        child: Text('No recent memories yet.', style: TextStyle(color: Color.fromARGB(255, 200, 46, 46))),
       );
     }
 
@@ -136,8 +161,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         final timestamp = activity['timestamp'] as String? ?? activity['created_at'] as String? ?? '';
         return ListTile(
           contentPadding: EdgeInsets.zero,
-          title: Text(summary, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text(timestamp, style: const TextStyle(fontSize: 12)),
+          title: Text(summary, style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white)),
+          subtitle: Text(timestamp, style: const TextStyle(fontSize: 12, color: Colors.white70)),
         );
       }).toList(),
     );
@@ -146,7 +171,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   Widget _buildScanCard() {
     final recognitionService = Provider.of<RecognitionService>(context);
     final person = recognitionService.recognizedPerson;
-    final recognizedName = person != null && person['match'] == true ? person['name'] as String? : null;
+    final isMatch = person != null && person['match'] == true;
+    final recognizedName = isMatch ? person['name'] as String? : null;
     final hasEnrollmentToken = widget.sessionToken.isNotEmpty;
 
     return Column(
@@ -158,12 +184,12 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             width: 200,
             height: 200,
             decoration: BoxDecoration(
-              color: hasEnrollmentToken ? DesignTokens.surface : DesignTokens.lightSurface,
+              color: hasEnrollmentToken ? const Color(0xFF1F2937) : const Color(0xFF374151),
               shape: BoxShape.circle,
               border: Border.all(color: hasEnrollmentToken ? DesignTokens.accent : DesignTokens.subtleBorder, width: 4),
               boxShadow: [
                 BoxShadow(
-                  color: const Color.fromRGBO(0, 0, 0, 0.12),
+                  color: Colors.black.withOpacity(0.18),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -173,7 +199,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
               child: Icon(
                 Icons.camera_alt,
                 size: 84,
-                color: hasEnrollmentToken ? DesignTokens.accent : DesignTokens.textSecondary,
+                color: hasEnrollmentToken ? DesignTokens.accent : Colors.white70,
               ),
             ),
           ),
@@ -181,14 +207,17 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         const SizedBox(height: 18),
         Text(
           hasEnrollmentToken ? 'Scan using camera icon' : 'Ask caregiver to save patient profile first',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: DesignTokens.textSecondary),
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 12),
         if (_scanning)
-          const CircularProgressIndicator()
-        else if (recognizedName != null)
-          Text('Recognized: $recognizedName', style: Theme.of(context).textTheme.titleMedium),
+          const CircularProgressIndicator(color: DesignTokens.accent)
+        else if (person != null)
+          Text(
+            isMatch ? 'Recognized: $recognizedName' : 'Unknown person detected',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(color: isMatch ? DesignTokens.success : Colors.orangeAccent),
+          ),
       ],
     );
   }
@@ -200,17 +229,17 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final statusText = widget.sessionToken.isEmpty
         ? 'Patient not enrolled yet. Caregiver must save profile before scan.'
         : person != null
-            ? 'Recognized: ${person['name']}'
+            ? (person['match'] == true ? 'Recognized: ${person['name']}' : 'Unknown person detected')
             : 'Ready to scan';
 
     return Scaffold(
-      backgroundColor: DesignTokens.pageBackground,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           child: Column(
             children: [
-              Text(statusText, style: Theme.of(context).textTheme.titleLarge),
+              Text(statusText, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white)),
               const SizedBox(height: 16),
               Expanded(child: Center(child: _buildScanCard())),
               const SizedBox(height: 20),
@@ -219,11 +248,11 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                 onPressed: () {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => PatientHistoryScreen(sessionToken: widget.sessionToken)));
                 },
-                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56), foregroundColor: Colors.white, side: const BorderSide(color: DesignTokens.accent)),
                 child: const Text('People I’ve talked to'),
               ),
               const SizedBox(height: 20),
-              Align(alignment: Alignment.centerLeft, child: Text('Recent memories', style: Theme.of(context).textTheme.titleMedium)),
+              Align(alignment: Alignment.centerLeft, child: Text('Recent memories', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white))),
               const SizedBox(height: 12),
               if (_loadingMemories)
                 const Center(child: CircularProgressIndicator())

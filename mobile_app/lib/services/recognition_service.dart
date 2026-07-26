@@ -73,22 +73,22 @@ class RecognitionService extends ChangeNotifier {
         return null;
       }
 
-      final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-known-person/');
-      final request = http.MultipartRequest('POST', uri);
-      request.fields['source'] = source;
-      request.headers['Authorization'] = 'Bearer $token';
-      request.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
+      final apiClient = ApiClient();
+      final response = await apiClient.sendMultipart(
+        'POST',
+        '/recognition/identify-known-person/',
+        token: token,
+        fields: {'source': source},
+        files: [http.MultipartFile.fromBytes('image', bytes, filename: filename)],
+      );
       if (response.statusCode != 200) return null;
       final payload = json.decode(response.body) as Map<String, dynamic>;
       final match = payload['match'] == true;
-      if (match) {
-        sessionToken = token;
-        patientId = payload['patient_id'] as int?;
+      sessionToken = token;
+      patientId = payload['patient_id'] as int?;
+      recognizedPerson = payload;
+      if (!match) {
         recognizedPerson = payload;
-      } else {
-        recognizedPerson = null;
       }
       notifyListeners();
       return payload;
@@ -106,13 +106,15 @@ class RecognitionService extends ChangeNotifier {
   /// a file path is not available.
   Future<Map<String, dynamic>?> attemptPatientRecognitionFromBytes(Uint8List bytes, String filename, String source) async {
     try {
-      final uri = Uri.parse('${ApiClient.baseUrl}/recognition/identify-patient/');
-      debugPrint('[recognition_service] posting patient recognition bytes=${bytes.length} filename=$filename source=$source to $uri');
-      final request = http.MultipartRequest('POST', uri);
-      request.fields['source'] = source;
-      request.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
-      final streamed = await request.send();
-      final response = await http.Response.fromStream(streamed);
+      final apiClient = ApiClient();
+      final firstBaseUrl = ApiClient.baseUrl;
+      debugPrint('[recognition_service] posting patient recognition bytes=${bytes.length} filename=$filename source=$source to $firstBaseUrl/recognition/identify-patient/');
+      final response = await apiClient.sendMultipart(
+        'POST',
+        '/recognition/identify-patient/',
+        fields: {'source': source},
+        files: [http.MultipartFile.fromBytes('image', bytes, filename: filename)],
+      );
       debugPrint('[recognition_service] response status=${response.statusCode} body=${response.body}');
       if (response.statusCode != 200) return null;
       final payload = json.decode(response.body) as Map<String, dynamic>;

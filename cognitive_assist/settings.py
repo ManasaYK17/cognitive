@@ -108,7 +108,7 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-RECOGNITION_CONFIDENCE_THRESHOLD = 0.7
+RECOGNITION_CONFIDENCE_THRESHOLD = 0.45
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL_NAME = os.environ.get('OLLAMA_MODEL_NAME', 'qwen2.5:7b')
 OPENROUTER_API_URL = os.environ.get('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')
