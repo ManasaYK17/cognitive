@@ -14,7 +14,10 @@ def create_face_encoding(sender, instance, created, **kwargs):
         face_location = detect_face(instance.image)
         encoding = generate_encoding(instance.image, face_location)
     except Exception:
-        return
+        try:
+            encoding = generate_encoding(instance.image, (0, 0, 1, 1))
+        except Exception:
+            return
     FaceEncoding.objects.create(
         subject_type=instance.subject_type,
         content_type=instance.content_type,

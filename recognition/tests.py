@@ -83,6 +83,17 @@ class RecognitionEndpointTests(APITestCase):
         image.save(buffer, format='JPEG')
         return SimpleUploadedFile('face.jpg', buffer.getvalue(), content_type='image/jpeg')
 
+    def _make_textured_image(self, size=(120, 120)):
+        image = Image.new('RGB', size, (255, 255, 255))
+        draw = ImageDraw.Draw(image)
+        for x in range(0, size[0], 10):
+            draw.line((x, 0, x + 20, size[1]), fill=(30, 60, 120))
+        for y in range(0, size[1], 10):
+            draw.line((0, y, size[0], y + 20), fill=(200, 80, 40))
+        buffer = io.BytesIO()
+        image.save(buffer, format='JPEG')
+        return SimpleUploadedFile('textured.jpg', buffer.getvalue(), content_type='image/jpeg')
+
     def test_identify_patient_returns_session_token_and_logs_history(self):
         response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -142,6 +153,31 @@ class RecognitionEndpointTests(APITestCase):
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['id'], self.known_person.id)
         self.assertTrue(FaceEncoding.objects.filter(face_image=self.known_person_face_image).exists())
+
+    def test_identify_known_person_falls_back_when_the_live_image_has_no_clear_face(self):
+        textured_image = self._make_textured_image()
+        FaceImage.objects.filter(pk=self.known_person_face_image.pk).delete()
+        FaceImage.objects.create(
+            subject_type='known_person',
+            image=textured_image,
+            object_id=self.known_person.id,
+            content_type=ContentType.objects.get_for_model(self.known_person),
+        )
+
+        issue_token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {issue_token_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': textured_image, 'source': 'phone_camera'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['id'], self.known_person.id)
 
     def test_identify_known_person_returns_bad_request_for_non_face_image(self):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self.image}, format='multipart')

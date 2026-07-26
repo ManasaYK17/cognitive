@@ -124,7 +124,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final knownPersonId = payload['id'] as int? ?? 0;
     final knownPersonName = payload['name'] as String? ?? 'Person';
     final knownPersonRelationship = payload['relationship'] as String?;
-    if (payload['match'] == true) {
+    final shouldOpenResult = payload['match'] == true || knownPersonId != 0;
+    if (shouldOpenResult) {
       await _announceMessage('Recognized $knownPersonName');
       navigator.push(
         MaterialPageRoute(

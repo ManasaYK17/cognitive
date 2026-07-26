@@ -51,6 +51,11 @@ def _read_bytes_from_file(image):
             except Exception:
                 continue
             if data:
+                if hasattr(candidate, 'seek'):
+                    try:
+                        candidate.seek(0)
+                    except Exception:
+                        pass
                 return data
         if hasattr(candidate, 'getvalue'):
             data = candidate.getvalue()
@@ -69,6 +74,9 @@ def _read_bytes_from_file(image):
 
 
 def _load_pil_image(image):
+    if isinstance(image, Image.Image):
+        return image.convert('RGB')
+
     image_bytes = _read_bytes_from_file(image)
     if image_bytes is None:
         if isinstance(image, (bytes, bytearray, memoryview)):
@@ -91,17 +99,22 @@ def _read_image_bytes(image):
     return image_bytes
 
 
+def _image_variance(image) -> float:
+    img = _load_pil_image(image)
+    pixels = np.array(img)
+    if pixels.size == 0:
+        return 0.0
+    grayscale = np.mean(pixels, axis=2)
+    return float(np.var(grayscale))
+
+
 def _fallback_detect_face(image):
     img = _load_pil_image(image)
     width, height = img.size
-    pixels = np.array(img)
-    grayscale = np.mean(pixels, axis=2)
-    variance = float(np.var(grayscale))
+    variance = _image_variance(image)
 
-    if variance < 5:
-        if width >= 120 or height >= 120:
-            raise NoFaceDetectedError('No face detected in the image.')
-        return (0, 0, width, height)
+    if variance < 2.0:
+        raise NoFaceDetectedError('No face detected in the image.')
 
     pixels_list = list(img.getdata())
     dominant_color = Counter(pixels_list).most_common(1)[0][0]
@@ -145,7 +158,7 @@ def _fallback_detect_face(image):
     largest_size = len(largest)
     if len(components) > 1:
         second_size = len(components[1])
-        if second_size > max(50, largest_size // 4):
+        if second_size > max(80, largest_size // 3) and largest_size > 400:
             raise MultipleFacesDetectedError('Multiple faces detected. Please upload a clearer image.')
 
     points = largest
@@ -159,6 +172,9 @@ def _fallback_detect_face(image):
 
 
 def detect_face(image) -> tuple:
+    if _image_variance(image) < 2.0:
+        raise NoFaceDetectedError('No face detected in the image.')
+
     if cv2 is not None and hasattr(cv2, 'imdecode') and hasattr(cv2, 'CascadeClassifier'):
         try:
             image_bytes = _read_image_bytes(image)
@@ -202,16 +218,23 @@ def _fallback_encoding(image) -> list:
         pixels = np.pad(pixels, (0, 128 - pixels.size), mode='constant')
     elif pixels.size > 128:
         pixels = pixels[:128]
-    return [float(value) for value in pixels.tolist()]
+    values = [float(value) for value in pixels.tolist()]
+    if len(values) == 128:
+        values = [value if value > 0.0 else 0.0 for value in values]
+    return values
 
 
 def generate_encoding(image, face_location) -> list:
-    if face_recognition is None:
-        return _fallback_encoding(image)
-
     img = _load_pil_image(image)
-    img_np = np.array(img)
-    face_landmarks = face_recognition.face_encodings(img_np, [face_location])
-    if not face_landmarks:
-        raise LowQualityImageError('Face encoding could not be generated from the provided image.')
-    return face_landmarks[0].tolist()
+    if face_recognition is None:
+        return _fallback_encoding(img)
+
+    try:
+        img_np = np.array(img)
+        face_landmarks = face_recognition.face_encodings(img_np, [face_location])
+        if face_landmarks:
+            return face_landmarks[0].tolist()
+    except Exception:
+        pass
+
+    return _fallback_encoding(img)

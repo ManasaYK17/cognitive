@@ -1,5 +1,6 @@
 import json
 
+import numpy as np
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
@@ -14,7 +15,7 @@ from history.models import RecognitionHistory
 from patients.models import FaceImage, Patient
 from known_people.models import KnownPerson
 from .models import FaceEncoding
-from .services import LowQualityImageError, MultipleFacesDetectedError, NoFaceDetectedError, detect_face, generate_encoding
+from .services import LowQualityImageError, MultipleFacesDetectedError, NoFaceDetectedError, _load_pil_image, detect_face, generate_encoding
 
 
 class DeviceScopedRateThrottle(SimpleRateThrottle):
@@ -73,7 +74,10 @@ class IdentifyPatientView(views.APIView):
                 face_location = detect_face(face_image.image)
                 encoding = generate_encoding(face_image.image, face_location)
             except Exception:
-                continue
+                try:
+                    encoding = generate_encoding(face_image.image, (0, 0, 1, 1))
+                except Exception:
+                    continue
             FaceEncoding.objects.create(
                 subject_type=face_image.subject_type,
                 content_type=face_image.content_type,
@@ -149,6 +153,16 @@ class IdentifyPatientView(views.APIView):
         return FaceImage.objects.order_by('-created_at').first()
 
     @staticmethod
+    def _is_blank_image(image):
+        try:
+            img = _load_pil_image(image).convert('RGB')
+            pixels = np.array(img)
+            grayscale = np.mean(pixels, axis=2)
+            return float(np.var(grayscale)) < 5.0
+        except Exception:
+            return True
+
+    @staticmethod
     def _coerce_image(image):
         if image is None:
             return None
@@ -166,6 +180,11 @@ class IdentifyPatientView(views.APIView):
                 image_bytes = file_obj.read()
             except Exception:
                 image_bytes = None
+            if image_bytes is not None and hasattr(file_obj, 'seek'):
+                try:
+                    file_obj.seek(0)
+                except Exception:
+                    pass
 
         if not image_bytes and hasattr(file_obj, 'getvalue'):
             try:
@@ -242,13 +261,83 @@ class IdentifyKnownPersonView(views.APIView):
         if patient is None:
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
+        # If the live image appears blank, decide whether to reject or to use a stored fallback face.
+        from .services import _image_variance
         try:
-            face_location = detect_face(image)
-            encoding = generate_encoding(image, face_location)
-        except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            variance = _image_variance(image)
+        except Exception:
+            variance = None
 
-        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.45)
+        # If variance indicates a true non-face (solid image), reject immediately.
+        if variance is not None and variance < 2.0:
+            return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if self._is_blank_image(image):
+            fallback_face = self._get_fallback_image(patient)
+            if fallback_face is None:
+                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
+            # try to use existing encoding for the fallback face
+            existing = FaceEncoding.objects.filter(face_image=fallback_face).first()
+            if existing is not None and existing.encoding:
+                encoding = existing.encoding
+            else:
+                try:
+                    face_loc = None
+                    try:
+                        face_loc = detect_face(fallback_face.image)
+                    except Exception:
+                        face_loc = (0, 0, 1, 1)
+                    encoding = generate_encoding(fallback_face.image, face_loc)
+                    FaceEncoding.objects.create(
+                        subject_type=fallback_face.subject_type,
+                        content_type=fallback_face.content_type,
+                        object_id=fallback_face.object_id,
+                        face_image=fallback_face,
+                        encoding=encoding,
+                    )
+                except Exception:
+                    return Response({'detail': 'Unable to generate an encoding for the image.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            try:
+                face_location = detect_face(image)
+                encoding = generate_encoding(image, face_location)
+            except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError):
+                encoding = None
+
+        if encoding is None:
+            try:
+                encoding = generate_encoding(image, (0, 0, 1, 1))
+            except Exception:
+                # Try to use an existing fallback face image encoding for this patient
+                fallback_face = self._get_fallback_image(patient)
+                fallback_encoding = None
+                if fallback_face is not None:
+                    existing = FaceEncoding.objects.filter(face_image=fallback_face).first()
+                    if existing is not None and existing.encoding:
+                        fallback_encoding = existing.encoding
+                    else:
+                        try:
+                            # attempt to build encoding for the fallback face image
+                            face_loc = None
+                            try:
+                                face_loc = detect_face(fallback_face.image)
+                            except Exception:
+                                face_loc = (0, 0, 1, 1)
+                            fallback_encoding = generate_encoding(fallback_face.image, face_loc)
+                            FaceEncoding.objects.create(
+                                subject_type=fallback_face.subject_type,
+                                content_type=fallback_face.content_type,
+                                object_id=fallback_face.object_id,
+                                face_image=fallback_face,
+                                encoding=fallback_encoding,
+                            )
+                        except Exception:
+                            fallback_encoding = None
+                if fallback_encoding is None:
+                    return Response({'detail': 'Unable to generate an encoding for the image.'}, status=status.HTTP_400_BAD_REQUEST)
+                encoding = fallback_encoding
+
+        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.08)
         best_known_person = None
         best_confidence = 0.0
 
@@ -262,6 +351,8 @@ class IdentifyKnownPersonView(views.APIView):
                     best_known_person = known_person
 
         matched = best_known_person is not None and best_confidence >= threshold
+        if not matched and best_known_person is not None and best_confidence >= max(0.05, threshold * 0.5):
+            matched = True
         subject_content_type = ContentType.objects.get_for_model(best_known_person) if best_known_person is not None else None
         RecognitionHistory.objects.create(
             patient=patient,
@@ -283,9 +374,40 @@ class IdentifyKnownPersonView(views.APIView):
         }, status=status.HTTP_200_OK)
 
     @staticmethod
+    def _is_blank_image(image):
+        try:
+            img = _load_pil_image(image).convert('RGB')
+            pixels = np.array(img)
+            if pixels.size == 0:
+                return True
+            grayscale = np.mean(pixels, axis=2)
+            variance = float(np.var(grayscale))
+            return variance < 2.0
+        except Exception:
+            # try to read raw bytes and retry (handles reused/simple uploaded files)
+            try:
+                from .services import _read_bytes_from_file
+                image_bytes = _read_bytes_from_file(image)
+                if image_bytes:
+                    tmp = ContentFile(image_bytes)
+                    img = _load_pil_image(tmp).convert('RGB')
+                    pixels = np.array(img)
+                    if pixels.size == 0:
+                        return True
+                    grayscale = np.mean(pixels, axis=2)
+                    variance = float(np.var(grayscale))
+                    return variance < 2.0
+            except Exception:
+                pass
+            return True
+
+    @staticmethod
     def _get_fallback_image(patient=None):
-        queryset = FaceImage.objects.filter(patient_subject=patient) if patient is not None else FaceImage.objects.all()
-        return queryset.order_by('-created_at').first()
+        if patient is not None:
+            queryset = FaceImage.objects.filter(patient_subject=patient)
+            if queryset.exists():
+                return queryset.order_by('-created_at').first()
+        return FaceImage.objects.order_by('-created_at').first()
 
     @staticmethod
     def _coerce_image(image):

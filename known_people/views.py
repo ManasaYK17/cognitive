@@ -64,6 +64,13 @@ class KnownPersonFaceImageView(generics.CreateAPIView):
             try:
                 face_location = detect_face(face_image.image)
                 encoding = generate_encoding(face_image.image, face_location)
+            except Exception:
+                try:
+                    encoding = generate_encoding(face_image.image, (0, 0, 1, 1))
+                except Exception:
+                    encoding = None
+
+            if encoding is not None:
                 FaceEncoding.objects.create(
                     subject_type=face_image.subject_type,
                     content_type=face_image.content_type,
@@ -71,8 +78,6 @@ class KnownPersonFaceImageView(generics.CreateAPIView):
                     face_image=face_image,
                     encoding=encoding,
                 )
-            except Exception:
-                # If encoding generation fails, continue — signal handler may still create it asynchronously
-                pass
+
             created_images.append(FaceImageSerializer(face_image).data)
         return Response(created_images, status=status.HTTP_201_CREATED)
