@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_client.dart';
+import 'audio_path.dart';
 
 class AudioService extends ChangeNotifier {
   final AudioRecorder _recorder = AudioRecorder();
@@ -22,8 +24,21 @@ class AudioService extends ChangeNotifier {
     if (kIsWeb) return false;
     if (!await ensurePermission() || _recording) return false;
 
-    final tempPath = '/tmp/cognitive_assist_recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    await _recorder.start(const RecordConfig(), path: tempPath);
+    final tempDir = Directory(systemTempPath);
+    if (!tempDir.existsSync()) {
+      tempDir.createSync(recursive: true);
+    }
+
+    final tempPath = '$systemTempPath$pathSeparator' 'cognitive_assist_recording_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+    try {
+      await _recorder.start(const RecordConfig(), path: tempPath);
+    } catch (error) {
+      lastSummaryMessage = 'Unable to start recording: $error';
+      notifyListeners();
+      return false;
+    }
+
     _recording = true;
     lastSummaryMessage = null;
     notifyListeners();
@@ -65,5 +80,15 @@ class AudioService extends ChangeNotifier {
     lastSummaryMessage = 'Failed to save conversation.';
     notifyListeners();
     return false;
+  }
+
+  Future<double?> getCurrentAmplitude() async {
+    if (!_recording) return null;
+    try {
+      final amplitude = await _recorder.getAmplitude();
+      return amplitude.current;
+    } catch (_) {
+      return null;
+    }
   }
 }

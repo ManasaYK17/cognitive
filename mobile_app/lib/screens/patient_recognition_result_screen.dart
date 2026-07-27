@@ -33,10 +33,13 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   bool _loading = true;
   bool _recording = false;
   bool _sending = false;
+  bool _readyToStart = false;
   String? _lastSummary;
   String? _statusMessage;
   String? _errorMessage;
-  Timer? _autoStopTimer;
+  double _volumeLevel = 0.0;
+  Timer? _silenceTimer;
+  Timer? _amplitudeMonitorTimer;
 
   @override
   void initState() {
@@ -50,11 +53,22 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   }
 
   Future<void> _loadAndCapture() async {
-    await _fetchLastSummary();
-    if (!mounted) return;
-    await _speakSummary();
-    if (!mounted) return;
-    await _startRecording();
+    try {
+      await _fetchLastSummary();
+      if (!mounted) return;
+      await _speakSummary();
+      if (!mounted) return;
+      if (_readyToStart) {
+        await _startRecording(autoStarted: true);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _errorMessage = 'Unable to start conversation capture: $error';
+        _statusMessage = 'Please tap Start Conversation to try again.';
+      });
+    }
   }
 
   Future<void> _fetchLastSummary() async {
@@ -106,16 +120,18 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
 
     if (!mounted) return;
     setState(() {
-      _statusMessage = 'Preparing to record your conversation...';
+      _readyToStart = true;
+      _statusMessage = 'Ready to capture your conversation.';
     });
   }
 
-  Future<void> _startRecording() async {
+  Future<void> _startRecording({bool autoStarted = false}) async {
+    if (_recording || _sending) return;
     final audioService = Provider.of<AudioService>(context, listen: false);
     setState(() {
       _loading = false;
-      _statusMessage = 'Starting recording...';
       _errorMessage = null;
+      _statusMessage = 'Starting recording...';
     });
 
     final started = await audioService.startRecording();
@@ -131,21 +147,25 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
 
     setState(() {
       _recording = true;
-      _statusMessage = 'Recording conversation. Tap stop when finished.';
+      _statusMessage = 'Capturing conversation...';
+      _readyToStart = false;
     });
 
-    _autoStopTimer?.cancel();
-    _autoStopTimer = Timer(const Duration(seconds: 25), _stopRecording);
+    _startListeningMonitoring();
+    if (!autoStarted) {
+      _scheduleSilenceTimeout();
+    }
   }
 
   Future<void> _stopRecording() async {
     if (!_recording) return;
-    _autoStopTimer?.cancel();
+    _cancelSilenceMonitoring();
 
     setState(() {
       _recording = false;
       _sending = true;
       _statusMessage = 'Saving conversation...';
+      _errorMessage = null;
     });
 
     final audioService = Provider.of<AudioService>(context, listen: false);
@@ -157,14 +177,57 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
       _statusMessage = success ? 'Conversation saved successfully. Returning home...' : 'Failed to save conversation. You can try again from home.';
     });
 
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-    Navigator.of(context).pop();
+    if (success) {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+
+  void _scheduleSilenceTimeout() {
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer(const Duration(seconds: 5), () {
+      if (_recording) {
+        setState(() {
+          _statusMessage = 'No speech detected for 5 seconds. Stopping capture...';
+        });
+        _stopRecording();
+      }
+    });
+  }
+
+  void _startListeningMonitoring() {
+    _amplitudeMonitorTimer?.cancel();
+    _amplitudeMonitorTimer = Timer.periodic(const Duration(milliseconds: 400), (_) async {
+      if (!_recording) {
+        _cancelSilenceMonitoring();
+        return;
+      }
+
+      final audioService = Provider.of<AudioService>(context, listen: false);
+      final amplitude = await audioService.getCurrentAmplitude();
+      if (!mounted) return;
+
+      setState(() {
+        _volumeLevel = (amplitude ?? 0.0).clamp(0.0, 1.0);
+      });
+
+      if (amplitude != null && amplitude > 0.03) {
+        _scheduleSilenceTimeout();
+      }
+    });
+    _scheduleSilenceTimeout();
+  }
+
+  void _cancelSilenceMonitoring() {
+    _silenceTimer?.cancel();
+    _amplitudeMonitorTimer?.cancel();
+    _volumeLevel = 0.0;
   }
 
   @override
   void dispose() {
-    _autoStopTimer?.cancel();
+    _cancelSilenceMonitoring();
     _flutterTts.stop();
     super.dispose();
   }
@@ -210,28 +273,50 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
               ),
               const SizedBox(height: 24),
               if (_statusMessage != null)
-                Text(_statusMessage!, style: const TextStyle(fontSize: 16), textAlign: TextAlign.center),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(_statusMessage!, style: const TextStyle(fontSize: 16), textAlign: TextAlign.center),
+                ),
               if (_loading) ...[
                 const SizedBox(height: 20),
                 const Center(child: CircularProgressIndicator()),
+              ],
+              if (_recording) ...[
+                const SizedBox(height: 12),
+                Text('Capturing conversation...', style: Theme.of(context).textTheme.bodyLarge),
+                const SizedBox(height: 12),
+                LinearProgressIndicator(value: _volumeLevel, minHeight: 10),
+                const SizedBox(height: 8),
+                Text(
+                  _volumeLevel > 0.03 ? 'Listening...' : 'Waiting for speech...',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14, color: Colors.black54),
+                ),
               ],
               if (_errorMessage != null) ...[
                 const SizedBox(height: 20),
                 Text(_errorMessage!, style: const TextStyle(color: Colors.red), textAlign: TextAlign.center),
               ],
               const Spacer(),
-              if (_recording)
+              if (_sending)
+                ElevatedButton(
+                  onPressed: null,
+                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                  child: const Text('Saving...'),
+                )
+              else if (_recording)
                 ElevatedButton.icon(
                   onPressed: _stopRecording,
                   icon: const Icon(Icons.stop_circle_outlined),
                   label: const Text('Stop recording'),
                   style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56), backgroundColor: Colors.red),
                 )
-              else if (!_loading && !_sending)
-                ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(),
+              else
+                ElevatedButton.icon(
+                  onPressed: _readyToStart ? () => _startRecording(autoStarted: false) : null,
+                  icon: const Icon(Icons.mic),
+                  label: const Text('Start Conversation'),
                   style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                  child: const Text('Back to home'),
                 ),
             ],
           ),
