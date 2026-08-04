@@ -10,6 +10,7 @@ class Patient(models.Model):
     date_of_birth = models.DateField(null=True, blank=True)
     age = models.PositiveIntegerField(null=True, blank=True)
     caregiver_photo = models.ImageField(upload_to='patient_photos/', blank=True, null=True)
+    fcm_device_token = models.CharField(max_length=255, blank=True, null=True)
     medical_notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

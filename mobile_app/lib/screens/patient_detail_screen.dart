@@ -8,7 +8,6 @@ import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../theme/design_tokens.dart';
 import '../widgets/face_scan_camera.dart';
-import 'patient_mode_screen.dart';
 
 class PatientDetailScreen extends StatefulWidget {
   final int? patientId;

@@ -113,7 +113,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
       sessionTokenOverride: widget.sessionToken,
     );
     if (payload == null || payload['id'] == null) {
-      final message = 'Unknown person detected';
+      const message = 'Unknown person detected';
       await _announceMessage(message);
       messenger.showSnackBar(
         const SnackBar(content: Text('Unknown person detected. Please try again.')),
@@ -190,7 +190,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
               border: Border.all(color: hasEnrollmentToken ? DesignTokens.accent : DesignTokens.subtleBorder, width: 4),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.18),
+                  color: Colors.black.withValues(alpha: 0.18),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),

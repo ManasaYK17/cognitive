@@ -1,19 +1,24 @@
 import json
+from datetime import timedelta
 
 import numpy as np
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
 from django.core.signing import dumps, loads
+from django.utils import timezone
 from rest_framework import status, views
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 
+from accounts.serializers import DeviceTokenRegistrationSerializer
+from geofencing.services import send_fcm_push
 from history.models import RecognitionHistory
 from patients.models import FaceImage, Patient
 from known_people.models import KnownPerson
+from conversations.models import ConversationHistory
 from .models import FaceEncoding
 from .services import LowQualityImageError, MultipleFacesDetectedError, NoFaceDetectedError, _load_pil_image, detect_face, generate_encoding
 
@@ -48,6 +53,35 @@ class IssuePatientSessionTokenView(views.APIView):
 
         session_token = dumps({'patient_id': patient.id, 'device_id': device_id})
         return Response({'patient_id': patient.id, 'patient_session_token': session_token}, status=status.HTTP_200_OK)
+
+
+class RegisterPatientDeviceTokenView(views.APIView):
+    """Lets the patient's own device register its FCM token, authenticated
+    the same way identify-known-person is (signed patient session token,
+    not caregiver JWT)."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
+        if not token:
+            return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            payload = loads(token)
+        except Exception:
+            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        patient_id = payload.get('patient_id') if isinstance(payload, dict) else None
+        patient = Patient.objects.filter(id=patient_id).first() if patient_id else None
+        if patient is None:
+            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = DeviceTokenRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        patient.fcm_device_token = serializer.validated_data['device_token']
+        patient.save(update_fields=['fcm_device_token'])
+        return Response({'detail': 'Device token registered.'})
 
 
 class IdentifyPatientView(views.APIView):
@@ -364,6 +398,46 @@ class IdentifyKnownPersonView(views.APIView):
             outcome='matched' if matched else 'not_matched',
         )
 
+        last_summary = None
+        if matched and best_known_person is not None:
+            latest_conversation = ConversationHistory.objects.filter(
+                patient_id=patient.id, known_person_id=best_known_person.id
+            ).order_by('-created_at').first()
+            if latest_conversation is not None:
+                last_summary = latest_conversation.summary
+
+        if matched and best_known_person is not None:
+            device_token = getattr(patient, 'fcm_device_token', None)
+            if device_token:
+                cooldown_cutoff = timezone.now() - timedelta(minutes=3)
+                recent_push = RecognitionHistory.objects.filter(
+                    patient=patient,
+                    subject_type='known_person',
+                    object_id=best_known_person.id,
+                    outcome='known_person_push',
+                    timestamp__gte=cooldown_cutoff,
+                ).exists()
+                if not recent_push:
+                    # Data-only message (no notification block) so the app can
+                    # act on it directly and open the result screen without
+                    # requiring the user to tap a notification.
+                    push_response = send_fcm_push(device_token, data={
+                        'known_person_id': str(best_known_person.id),
+                        'name': best_known_person.name or '',
+                        'relationship': best_known_person.relationship or '',
+                        'last_summary': last_summary or '',
+                    })
+                    if push_response is not None:
+                        RecognitionHistory.objects.create(
+                            patient=patient,
+                            subject_type='known_person',
+                            content_type=subject_content_type,
+                            object_id=best_known_person.id,
+                            source='recognition_push',
+                            confidence_score=best_confidence,
+                            outcome='known_person_push',
+                        )
+
         return Response({
             'match': matched,
             'confidence': round(best_confidence, 4),
@@ -371,6 +445,7 @@ class IdentifyKnownPersonView(views.APIView):
             'name': best_known_person.name if best_known_person is not None else None,
             'relationship': best_known_person.relationship if best_known_person is not None else None,
             'patient_id': patient.id,
+            'last_summary': last_summary,
         }, status=status.HTTP_200_OK)
 
     @staticmethod

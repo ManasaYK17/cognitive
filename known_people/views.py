@@ -1,14 +1,54 @@
 from django.contrib.contenttypes.models import ContentType
-from rest_framework import generics, permissions, status
+from django.core.signing import loads
+from rest_framework import generics, permissions, status, views
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from .models import KnownPerson
 from .serializers import KnownPersonSerializer
 from .permissions import IsCaregiverForKnownPerson
-from patients.models import FaceImage
+from patients.models import FaceImage, Patient
 from patients.serializers import FaceImageSerializer
 from recognition.services import detect_face, generate_encoding
 from recognition.models import FaceEncoding
+from conversations.models import ConversationHistory
+from conversations.views import DeviceScopedRateThrottle
+
+
+def save_face_images_for_known_person(known_person, files):
+    """Replace a known person's face images with newly uploaded files,
+    generating a FaceEncoding for each where possible. Reused by both
+    normal person registration and encounter-based creation."""
+    content_type = ContentType.objects.get_for_model(known_person.__class__)
+    FaceImage.objects.filter(content_type=content_type, object_id=known_person.id).delete()
+
+    created_images = []
+    for image_file in files:
+        face_image = FaceImage.objects.create(
+            subject_type='known_person',
+            image=image_file,
+            object_id=known_person.id,
+            content_type=content_type,
+        )
+        try:
+            face_location = detect_face(face_image.image)
+            encoding = generate_encoding(face_image.image, face_location)
+        except Exception:
+            try:
+                encoding = generate_encoding(face_image.image, (0, 0, 1, 1))
+            except Exception:
+                encoding = None
+
+        if encoding is not None:
+            FaceEncoding.objects.create(
+                subject_type=face_image.subject_type,
+                content_type=face_image.content_type,
+                object_id=face_image.object_id,
+                face_image=face_image,
+                encoding=encoding,
+            )
+
+        created_images.append(FaceImageSerializer(face_image).data)
+    return created_images
 
 
 class KnownPersonListCreateView(generics.ListCreateAPIView):
@@ -49,35 +89,69 @@ class KnownPersonFaceImageView(generics.CreateAPIView):
         if not files:
             return Response({'detail': 'No files provided.'}, status=status.HTTP_400_BAD_REQUEST)
         # Remove existing known-person face images so the new upload replaces previous faces
-        content_type = ContentType.objects.get_for_model(known_person.__class__)
-        FaceImage.objects.filter(content_type=content_type, object_id=known_person.id).delete()
-
-        created_images = []
-        for image_file in files:
-            face_image = FaceImage.objects.create(
-                subject_type='known_person',
-                image=image_file,
-                object_id=known_person.id,
-                content_type=content_type,
-            )
-            # Ensure a FaceEncoding exists for the newly created face image (generate synchronously)
-            try:
-                face_location = detect_face(face_image.image)
-                encoding = generate_encoding(face_image.image, face_location)
-            except Exception:
-                try:
-                    encoding = generate_encoding(face_image.image, (0, 0, 1, 1))
-                except Exception:
-                    encoding = None
-
-            if encoding is not None:
-                FaceEncoding.objects.create(
-                    subject_type=face_image.subject_type,
-                    content_type=face_image.content_type,
-                    object_id=face_image.object_id,
-                    face_image=face_image,
-                    encoding=encoding,
-                )
-
-            created_images.append(FaceImageSerializer(face_image).data)
+        created_images = save_face_images_for_known_person(known_person, files)
         return Response(created_images, status=status.HTTP_201_CREATED)
+
+
+class KnownPersonCreateFromEncounterView(views.APIView):
+    """Registers a new (unidentified) known person from a live encounter:
+    the patient's device captured face image(s) and a conversation summary
+    for someone not yet in the system. Creates a placeholder KnownPerson
+    for the caregiver to fill in and review later. Called directly by the
+    patient's device using its signed session token, same as
+    conversations.views.ConversationSummarizeView."""
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+    parser_classes = [MultiPartParser, FormParser]
+    throttle_classes = [DeviceScopedRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({'detail': 'No files provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        summary = request.data.get('summary', '').strip()
+        if not summary:
+            return Response({'detail': 'A conversation summary is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        patient_id = request.data.get('patient_id')
+        if not patient_id:
+            return Response({'detail': 'patient_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
+        if not token:
+            return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        try:
+            payload = loads(token)
+        except Exception:
+            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        patient = Patient.objects.filter(id=payload.get('patient_id')).first()
+        if patient is None or str(payload.get('patient_id')) != str(patient_id):
+            return Response({'detail': 'Token patient_id does not match request patient_id.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        known_person = KnownPerson.objects.create(
+            patient=patient,
+            name='Unnamed — pending review',
+            relationship='Unnamed — pending review',
+        )
+
+        created_images = save_face_images_for_known_person(known_person, files)
+
+        conversation = ConversationHistory.objects.create(
+            patient=patient,
+            known_person=known_person,
+            transcript='',
+            summary=summary,
+        )
+
+        return Response(
+            {
+                'known_person': KnownPersonSerializer(known_person, context={'request': request}).data,
+                'face_images': created_images,
+                'conversation_history_id': conversation.id,
+            },
+            status=status.HTTP_201_CREATED,
+        )

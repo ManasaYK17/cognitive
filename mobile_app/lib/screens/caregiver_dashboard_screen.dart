@@ -469,7 +469,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                         BarChartData(
                           maxY: weeklyMax,
                           alignment: BarChartAlignment.spaceAround,
-                          barTouchData: BarTouchData(enabled: false),
+                          barTouchData: const BarTouchData(enabled: false),
                           titlesData: FlTitlesData(
                             topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                             rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),

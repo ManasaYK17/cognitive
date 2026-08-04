@@ -55,6 +55,7 @@ class RecognitionHistory(models.Model):
             ('matched', 'Matched'),
             ('not_matched', 'Not Matched'),
             ('breach_alert', 'Breach Alert'),
+            ('known_person_push', 'Known Person Push'),
         ],
     )
 

@@ -29,8 +29,8 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
   final _addressController = TextEditingController();
   final _notesController = TextEditingController();
   bool _loading = false;
-  List<XFile> _images = [];
-  List<Uint8List> _imageBytes = [];
+  final List<XFile> _images = [];
+  final List<Uint8List> _imageBytes = [];
   String? _existingFaceUrl;
 
   final ApiClient _api = ApiClient();

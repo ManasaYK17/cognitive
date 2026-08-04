@@ -13,6 +13,7 @@ class PatientRecognitionResultScreen extends StatefulWidget {
   final String knownPersonName;
   final String? knownPersonRelationship;
   final String sessionToken;
+  final String? initialLastSummary;
 
   const PatientRecognitionResultScreen({
     required this.patientId,
@@ -20,6 +21,7 @@ class PatientRecognitionResultScreen extends StatefulWidget {
     required this.knownPersonName,
     this.knownPersonRelationship,
     required this.sessionToken,
+    this.initialLastSummary,
     super.key,
   });
 
@@ -44,6 +46,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   @override
   void initState() {
     super.initState();
+    _lastSummary = widget.initialLastSummary?.trim().isNotEmpty == true ? widget.initialLastSummary : null;
     _initializeTts();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadAndCapture());
   }
@@ -72,6 +75,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   }
 
   Future<void> _fetchLastSummary() async {
+    if (_lastSummary != null) return;
     final response = await _api.get(
       '/history/patient-view/',
       token: widget.sessionToken,

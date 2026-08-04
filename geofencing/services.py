@@ -31,6 +31,36 @@ def _get_firebase_app():
     return _firebase_app, _messaging
 
 
+def send_fcm_push(device_token, title=None, body=None, data=None):
+    """Send an FCM push to a single device token. Reused by any flow that
+    needs to notify a device (geofence breach alerts, recognition matches,
+    etc.) so the send/error-handling logic lives in one place.
+    Returns the FCM message id on success, or None if push is disabled,
+    misconfigured, or the send failed."""
+    try:
+        app, messaging_client = _get_firebase_app()
+    except RuntimeError as exc:
+        logger.warning('FCM disabled or misconfigured: %s', exc)
+        return None
+
+    notification = None
+    if title or body:
+        notification = messaging_client.Notification(title=title, body=body)
+
+    message = messaging_client.Message(
+        notification=notification,
+        data=data or {},
+        token=device_token,
+    )
+    try:
+        response = messaging_client.send(message, app=app)
+        logger.info('Sent FCM message %s to token %s', response, device_token)
+        return response
+    except Exception as exc:
+        logger.exception('Failed to send FCM message: %s', exc)
+        return None
+
+
 def check_and_alert(patient, location_ping):
     try:
         safe_zone = getattr(patient, 'safe_zone', None)
@@ -62,22 +92,12 @@ def check_and_alert(patient, location_ping):
                 logger.warning('No FCM device token registered for caregiver %s', caregiver.email)
                 return
 
-            try:
-                app, messaging_client = _get_firebase_app()
-                message = messaging_client.Message(
-                    notification=messaging_client.Notification(
-                        title=f'Patient {patient.name} is out of range',
-                        body=f'Location: {location_ping.latitude}, {location_ping.longitude}',
-                    ),
-                    token=device_token,
-                )
-                response = messaging_client.send(message, app=app)
-                logger.info('Sent FCM alert %s for patient %s', response, patient)
-            except RuntimeError as exc:
-                logger.warning('FCM disabled or misconfigured: %s', exc)
-                return
-            except Exception as exc:
-                logger.exception('Failed to send FCM alert: %s', exc)
+            response = send_fcm_push(
+                device_token,
+                title=f'Patient {patient.name} is out of range',
+                body=f'Location: {location_ping.latitude}, {location_ping.longitude}',
+            )
+            if response is None:
                 return
 
             RecognitionHistory.objects.create(

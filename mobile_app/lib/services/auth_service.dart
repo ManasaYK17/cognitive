@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'api_client.dart';
+import 'notification_service.dart';
 
 class AuthService extends ChangeNotifier {
   String? _accessToken;
@@ -14,9 +15,21 @@ class AuthService extends ChangeNotifier {
 
   final ApiClient _client = ApiClient();
 
+  AuthService() {
+    if (!kIsWeb) {
+      // Whenever FCM rotates the device's token, re-register it for
+      // whichever patient session is currently active.
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+        _registerPatientDeviceToken(firebaseToken: newToken);
+      });
+    }
+  }
+
   void setPatientSessionToken(String token) {
     _patientSessionToken = token;
     notifyListeners();
+    _registerPatientDeviceToken();
+    NotificationService.consumePendingKnownPersonPush();
   }
 
   Future<bool> login(String email, String password) async {
@@ -104,5 +117,17 @@ class AuthService extends ChangeNotifier {
     if (firebaseToken == null || _accessToken == null) return;
     await _client.post('/accounts/register-device-token/',
         body: {'device_token': firebaseToken}, token: _accessToken);
+  }
+
+  Future<void> _registerPatientDeviceToken({String? firebaseToken}) async {
+    if (kIsWeb) return;
+    final token = firebaseToken ?? await FirebaseMessaging.instance.getToken();
+    if (token == null || _patientSessionToken == null) return;
+    try {
+      await _client.post('/recognition/register-patient-device-token/',
+          body: {'device_token': token}, token: _patientSessionToken);
+    } catch (error) {
+      debugPrint('AuthService._registerPatientDeviceToken error: $error');
+    }
   }
 }

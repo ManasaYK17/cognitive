@@ -14,8 +14,32 @@ void main() async {
   runApp(const CognitiveAssistApp());
 }
 
-class CognitiveAssistApp extends StatelessWidget {
+class CognitiveAssistApp extends StatefulWidget {
   const CognitiveAssistApp({super.key});
+
+  @override
+  State<CognitiveAssistApp> createState() => _CognitiveAssistAppState();
+}
+
+class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      NotificationService.consumePendingKnownPersonPush();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +52,7 @@ class CognitiveAssistApp extends StatelessWidget {
       ],
       child: MaterialApp(
         title: 'Cognitive Assist',
+        navigatorKey: NotificationService.navigatorKey,
         theme: DesignTokens.darkTheme(),
         darkTheme: DesignTokens.darkTheme(),
         themeMode: ThemeMode.dark,
