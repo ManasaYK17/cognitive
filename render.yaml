@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: cognitive-assist-backend
+    runtime: docker
+    plan: free
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com"
+      - key: USE_MONGODB
+        value: "false"

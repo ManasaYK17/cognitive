@@ -10,3 +10,5 @@ numpy>=2.2.5
 requests>=2.31.0
 SpeechRecognition>=3.9.0
 django-cors-headers==4.0.0
+gunicorn>=22.0.0
+whitenoise>=6.7.0
