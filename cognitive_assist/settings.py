@@ -64,7 +64,14 @@ MONGO_HOST = os.environ.get('MONGO_HOST', 'localhost')
 
 USE_MONGODB = os.environ.get('USE_MONGODB', 'false').lower() == 'true'
 
-if USE_MONGODB:
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    import dj_database_url
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600),
+    }
+elif USE_MONGODB:
     DATABASES = {
         'default': {
             'ENGINE': 'djongo',
