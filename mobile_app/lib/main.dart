@@ -38,6 +38,7 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       NotificationService.consumePendingKnownPersonPush();
+      NotificationService.consumePendingGeofenceAlert();
     }
   }
 

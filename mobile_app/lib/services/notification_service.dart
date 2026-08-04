@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../screens/patient_location_screen.dart';
 import '../screens/patient_recognition_result_screen.dart';
 import 'auth_service.dart';
 import 'recognition_service.dart';
@@ -20,6 +22,11 @@ class NotificationService {
   static const _pendingKnownPersonNameKey = 'pending_known_person_name';
   static const _pendingKnownPersonRelationshipKey = 'pending_known_person_relationship';
   static const _pendingKnownPersonSummaryKey = 'pending_known_person_summary';
+
+  static const _pendingGeofencePatientIdKey = 'pending_geofence_patient_id';
+  static const _pendingGeofencePatientNameKey = 'pending_geofence_patient_name';
+  static const _pendingGeofenceLatKey = 'pending_geofence_lat';
+  static const _pendingGeofenceLngKey = 'pending_geofence_lng';
 
   static Future<void> initialize() async {
     if (kIsWeb) {
@@ -40,12 +47,24 @@ class NotificationService {
         // data-only and is handled via FirebaseMessaging.onMessage below
         // (foreground) and consumePendingKnownPersonPush (background/
         // killed), since it never produces a system notification to tap.
+        final payload = response.payload;
+        if (payload == null || payload.isEmpty) return;
+        try {
+          final data = json.decode(payload) as Map<String, dynamic>;
+          if (data['type'] == 'geofence_alert') {
+            await _handleGeofenceAlertTap(data);
+          }
+        } catch (_) {}
       },
     );
 
     FirebaseMessaging.onMessage.listen((message) {
       if (message.notification != null) {
-        _showNotification(message.notification!.title, message.notification!.body);
+        _showNotification(
+          message.notification!.title,
+          message.notification!.body,
+          payload: message.data.isNotEmpty ? json.encode(message.data) : null,
+        );
       }
       _handleForegroundKnownPersonPush(message.data);
     });
@@ -101,9 +120,92 @@ class NotificationService {
   static Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     await Firebase.initializeApp();
     if (message.notification != null) {
-      await _showNotification(message.notification!.title, message.notification!.body);
+      await _showNotification(
+        message.notification!.title,
+        message.notification!.body,
+        payload: message.data.isNotEmpty ? json.encode(message.data) : null,
+      );
     }
     await _persistPendingKnownPersonPush(message.data);
+  }
+
+  /// Handles a tap on a geofence-breach local notification: navigates
+  /// straight to the patient's live location if the app already has a
+  /// live navigator + logged-in caregiver, otherwise stashes the payload
+  /// for consumePendingGeofenceAlert() to pick up once it does (mirrors
+  /// the known-person pending-push pattern above).
+  static Future<void> _handleGeofenceAlertTap(Map<String, dynamic> data) async {
+    final patientId = int.tryParse(data['patient_id']?.toString() ?? '');
+    if (patientId == null) return;
+
+    final navigated = _navigateToPatientLocation(
+      patientId: patientId,
+      patientName: data['patient_name'] as String?,
+      latitude: double.tryParse(data['latitude']?.toString() ?? ''),
+      longitude: double.tryParse(data['longitude']?.toString() ?? ''),
+    );
+    if (!navigated) {
+      await _persistPendingGeofenceAlert(data);
+    }
+  }
+
+  static bool _navigateToPatientLocation({
+    required int patientId,
+    required String? patientName,
+    required double? latitude,
+    required double? longitude,
+  }) {
+    final context = navigatorKey.currentContext;
+    if (context == null) return false;
+
+    final accessToken = Provider.of<AuthService>(context, listen: false).accessToken;
+    if (accessToken == null) return false;
+
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => PatientLocationScreen(
+          patientId: patientId,
+          patientName: patientName ?? 'Patient',
+          initialLatitude: latitude,
+          initialLongitude: longitude,
+        ),
+      ),
+    );
+    return true;
+  }
+
+  static Future<void> _persistPendingGeofenceAlert(Map<String, dynamic> data) async {
+    final patientId = int.tryParse(data['patient_id']?.toString() ?? '');
+    if (patientId == null) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_pendingGeofencePatientIdKey, patientId);
+    await _setOrRemove(prefs, _pendingGeofencePatientNameKey, data['patient_name'] as String?);
+    await _setOrRemove(prefs, _pendingGeofenceLatKey, data['latitude'] as String?);
+    await _setOrRemove(prefs, _pendingGeofenceLngKey, data['longitude'] as String?);
+  }
+
+  /// Call whenever the app regains a live caregiver session (resumed from
+  /// background, or a fresh caregiver login just completed) to consume and
+  /// act on any geofence alert tap received while the app couldn't
+  /// navigate directly.
+  static Future<void> consumePendingGeofenceAlert() async {
+    final prefs = await SharedPreferences.getInstance();
+    final patientId = prefs.getInt(_pendingGeofencePatientIdKey);
+    if (patientId == null) return;
+
+    final navigated = _navigateToPatientLocation(
+      patientId: patientId,
+      patientName: prefs.getString(_pendingGeofencePatientNameKey),
+      latitude: double.tryParse(prefs.getString(_pendingGeofenceLatKey) ?? ''),
+      longitude: double.tryParse(prefs.getString(_pendingGeofenceLngKey) ?? ''),
+    );
+    if (!navigated) return;
+
+    await prefs.remove(_pendingGeofencePatientIdKey);
+    await prefs.remove(_pendingGeofencePatientNameKey);
+    await prefs.remove(_pendingGeofenceLatKey);
+    await prefs.remove(_pendingGeofenceLngKey);
   }
 
   /// The background isolate has no navigatorKey/Provider tree, so a
@@ -148,7 +250,7 @@ class NotificationService {
     await prefs.remove(_pendingKnownPersonSummaryKey);
   }
 
-  static Future<void> _showNotification(String? title, String? body) async {
+  static Future<void> _showNotification(String? title, String? body, {String? payload}) async {
     const androidDetails = AndroidNotificationDetails(
       'cognitive_assist_channel',
       'Cognitive Assist Alerts',
@@ -156,6 +258,12 @@ class NotificationService {
       priority: Priority.high,
     );
     const iOSDetails = DarwinNotificationDetails();
-    await _localNotifications.show(0, title, body, const NotificationDetails(android: androidDetails, iOS: iOSDetails));
+    await _localNotifications.show(
+      0,
+      title,
+      body,
+      const NotificationDetails(android: androidDetails, iOS: iOSDetails),
+      payload: payload,
+    );
   }
 }

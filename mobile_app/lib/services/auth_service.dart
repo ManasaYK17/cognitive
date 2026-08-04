@@ -47,6 +47,7 @@ class AuthService extends ChangeNotifier {
         _lastError = null;
         await _registerDeviceToken();
         notifyListeners();
+        NotificationService.consumePendingGeofenceAlert();
         return true;
       }
       try {

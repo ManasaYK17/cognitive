@@ -8,6 +8,7 @@ import 'patient_detail_screen.dart';
 import 'known_person_list_screen.dart';
 import 'history_dashboard_screen.dart';
 import 'safe_zone_screen.dart';
+import 'patient_location_screen.dart';
 import 'face_scan_screen.dart';
 
 class CaregiverDashboardScreen extends StatefulWidget {
@@ -166,6 +167,21 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
               if (saved == true) {
                 _loadPatient();
               }
+            },
+          ),
+          const SizedBox(height: 18),
+          _sidebarItem(
+            icon: Icons.my_location,
+            label: 'Location',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PatientLocationScreen(
+                    patientId: patientId,
+                    patientName: _patient?['name'] as String? ?? 'Patient',
+                  ),
+                ),
+              );
             },
           ),
           const Spacer(),

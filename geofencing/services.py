@@ -96,6 +96,13 @@ def check_and_alert(patient, location_ping):
                 device_token,
                 title=f'Patient {patient.name} is out of range',
                 body=f'Location: {location_ping.latitude}, {location_ping.longitude}',
+                data={
+                    'type': 'geofence_alert',
+                    'patient_id': str(patient.id),
+                    'patient_name': patient.name,
+                    'latitude': str(location_ping.latitude),
+                    'longitude': str(location_ping.longitude),
+                },
             )
             if response is None:
                 return

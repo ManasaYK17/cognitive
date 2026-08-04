@@ -37,6 +37,33 @@ class SafeZoneView(views.APIView):
         return Response(serializer.data)
 
 
+class PatientLatestLocationView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk, *args, **kwargs):
+        patient = Patient.objects.filter(id=pk, caregiver=request.user).first()
+        if not patient:
+            return Response({'detail': 'Patient not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
+
+        location_ping = LocationPing.objects.filter(patient=patient).order_by('-timestamp').first()
+        if location_ping is None:
+            return Response({'detail': 'No location data yet.'}, status=status.HTTP_404_NOT_FOUND)
+
+        safe_zone = getattr(patient, 'safe_zone', None)
+        inside = None
+        if safe_zone is not None and location_ping.distance_from_center_meters is not None:
+            inside = location_ping.distance_from_center_meters <= safe_zone.radius_meters
+
+        return Response({
+            'latitude': location_ping.latitude,
+            'longitude': location_ping.longitude,
+            'timestamp': location_ping.timestamp,
+            'distance_from_center_meters': location_ping.distance_from_center_meters,
+            'inside_safe_zone': inside,
+            'safe_zone': SafeZoneSerializer(safe_zone).data if safe_zone is not None else None,
+        })
+
+
 class LocationPingView(views.APIView):
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
