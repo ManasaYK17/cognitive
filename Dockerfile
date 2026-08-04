@@ -30,4 +30,6 @@ RUN python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
-CMD sh -c "python manage.py migrate --noinput && gunicorn cognitive_assist.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"
+# --run-syncdb: settings.py disables migrations for contenttypes/auth/admin/sessions/messages,
+# so those apps' tables only get created via syncdb, not the migration graph.
+CMD sh -c "python manage.py migrate --noinput --run-syncdb && gunicorn cognitive_assist.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"
