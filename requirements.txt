@@ -8,6 +8,7 @@ setuptools<81
 pillow>=11.2.1
 numpy>=2.2.5
 requests>=2.31.0
+scipy>=1.14.0
 SpeechRecognition>=3.9.0
 django-cors-headers==4.0.0
 gunicorn>=22.0.0
