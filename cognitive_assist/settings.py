@@ -91,15 +91,19 @@ else:
 
 AUTH_USER_MODEL = 'accounts.Caregiver'
 
-MIGRATION_MODULES = {
-    'admin': None,
-    'auth': None,
-    'contenttypes': None,
-    'sessions': None,
-    'messages': None,
-    'staticfiles': None,
-    # 'accounts': None,  # allow migrations for accounts during local development
-}
+# Only skip these apps' migrations for local sqlite dev. On Postgres (DATABASE_URL set),
+# --run-syncdb ordering would try to create admin.LogEntry (FK to accounts.Caregiver)
+# before accounts' own migrations run, which Postgres rejects unlike sqlite.
+if not DATABASE_URL:
+    MIGRATION_MODULES = {
+        'admin': None,
+        'auth': None,
+        'contenttypes': None,
+        'sessions': None,
+        'messages': None,
+        'staticfiles': None,
+        # 'accounts': None,  # allow migrations for accounts during local development
+    }
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

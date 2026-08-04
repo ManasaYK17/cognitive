@@ -30,6 +30,6 @@ RUN python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
-# --run-syncdb: settings.py disables migrations for contenttypes/auth/admin/sessions/messages,
-# so those apps' tables only get created via syncdb, not the migration graph.
-CMD sh -c "python manage.py migrate --noinput --run-syncdb && gunicorn cognitive_assist.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"
+# On Postgres, settings.py leaves the built-in apps' migrations enabled (see MIGRATION_MODULES),
+# so a plain migrate handles everything in correct dependency order — no --run-syncdb needed here.
+CMD sh -c "python manage.py migrate --noinput && gunicorn cognitive_assist.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"
