@@ -12,3 +12,5 @@ SpeechRecognition>=3.9.0
 django-cors-headers==4.0.0
 gunicorn>=22.0.0
 whitenoise>=6.7.0
+firebase-admin>=7.0.0
+python-dotenv>=1.0.0

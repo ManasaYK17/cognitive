@@ -11,6 +11,10 @@ db.sqlite3
 db.sqlite3-journal
 media/
 
+# Secrets
+.env
+secrets/
+
 # Editor
 .vscode/
 .idea/

@@ -12,3 +12,5 @@ services:
         value: ".onrender.com"
       - key: USE_MONGODB
         value: "false"
+      - key: FCM_SERVICE_ACCOUNT_JSON
+        sync: false
