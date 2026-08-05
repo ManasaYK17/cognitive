@@ -21,6 +21,34 @@ class SummarizationError(Exception):
     pass
 
 
+# recognize_google's free/unofficial endpoint (no api_key -- see below) is
+# unreliable on long continuous clips sent as a single request: confirmed
+# directly against a real 60s device recording where the whole file came
+# back UnknownValueError, but splitting it into 10s chunks transcribed 5 of
+# 6 correctly. transcribe_audio() below chunks for this reason -- a bad or
+# silent chunk then just contributes nothing, instead of blanking out an
+# otherwise-good recording.
+_TRANSCRIBE_CHUNK_SECONDS = 10
+
+
+def _recognize_chunk(recognizer, audio_data):
+    # Prefer local offline recognition if available, otherwise fall back.
+    if hasattr(recognizer, 'recognize_sphinx'):
+        try:
+            return recognizer.recognize_sphinx(audio_data)
+        except sr.RequestError:
+            pass
+        except sr.UnknownValueError:
+            return None
+
+    try:
+        return recognizer.recognize_google(audio_data)
+    except sr.RequestError as exc:
+        raise SpeechToTextError(f'Speech recognition service error: {exc}') from exc
+    except sr.UnknownValueError:
+        return None
+
+
 def transcribe_audio(audio_file):
     if sr is None:
         raise SpeechToTextError('SpeechRecognition library is not installed.')
@@ -30,28 +58,21 @@ def transcribe_audio(audio_file):
     if raw_bytes is None:
         raise SpeechToTextError('Unable to read audio data.')
 
-    audio_source = io.BytesIO(raw_bytes)
     try:
-        with sr.AudioFile(audio_source) as source:
-            audio_data = recognizer.record(source)
+        chunks = []
+        with sr.AudioFile(io.BytesIO(raw_bytes)) as source:
+            while True:
+                audio_data = recognizer.record(source, duration=_TRANSCRIBE_CHUNK_SECONDS)
+                if len(audio_data.frame_data) == 0:
+                    break
+                chunks.append(audio_data)
     except Exception as exc:
         raise SpeechToTextError(f'Unable to process audio file: {exc}') from exc
 
-    # Prefer local offline recognition if available, otherwise fall back.
-    if hasattr(recognizer, 'recognize_sphinx'):
-        try:
-            return recognizer.recognize_sphinx(audio_data)
-        except sr.RequestError:
-            pass
-        except sr.UnknownValueError:
-            raise SpeechToTextError('Speech could not be understood.')
-
-    try:
-        return recognizer.recognize_google(audio_data)
-    except sr.RequestError as exc:
-        raise SpeechToTextError(f'Speech recognition service error: {exc}') from exc
-    except sr.UnknownValueError:
+    transcripts = [text for text in (_recognize_chunk(recognizer, chunk) for chunk in chunks) if text]
+    if not transcripts:
         raise SpeechToTextError('Speech could not be understood.')
+    return ' '.join(transcripts)
 
 
 def _high_pass_filter_wav_bytes(raw_bytes, cutoff_hz=300.0, order=4):
@@ -108,7 +129,7 @@ def transcribe_audio_high_pass(audio_file):
     return transcribe_audio(io.BytesIO(filtered_bytes))
 
 
-def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_seconds=10):
+def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_seconds=60):
     prompt = (
         'Please provide a concise 2-3 sentence summary of the following conversation transcript:\n\n'
         f'{transcript}\n\n'
@@ -157,11 +178,21 @@ def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_
             content = content.get('text')
         return content.strip()
 
+    # Ollama's /api/generate streams NDJSON by default (one JSON object per
+    # token) unless stream is explicitly disabled -- confirmed directly
+    # against a local Ollama instance: without stream=False, response.json()
+    # fails to parse the multi-line body as a single document.
+    # temperature/max_tokens aren't top-level fields on this endpoint either
+    # (silently ignored there); Ollama takes them under "options" as
+    # temperature/num_predict.
     payload = {
         'model': model_name,
         'prompt': prompt,
-        'temperature': 0.2,
-        'max_tokens': 200,
+        'stream': False,
+        'options': {
+            'temperature': 0.2,
+            'num_predict': 200,
+        },
     }
 
     try:
@@ -176,23 +207,15 @@ def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_
     except ValueError as exc:
         raise SummarizationError('Invalid response from Ollama service.') from exc
 
-    results = body.get('results')
-    if not results or not isinstance(results, list):
-        raise SummarizationError('Ollama response did not contain summarization results.')
-
-    first_result = results[0]
-    output = first_result.get('output') or []
-    if not output or not isinstance(output, list):
-        raise SummarizationError('Ollama response output is missing.')
-
-    text_parts = [item.get('text') for item in output if isinstance(item, dict) and item.get('type') == 'output_text']
-    if not text_parts:
-        text_parts = [item.get('text') for item in output if isinstance(item, dict) and item.get('text')]
-
-    if not text_parts:
+    # Ollama's actual /api/generate response shape is a flat {"response":
+    # "...", "done": true, ...} -- not the OpenAI Responses API's nested
+    # results[].output[].text shape this used to look for, which no real
+    # Ollama response would ever have.
+    text = body.get('response')
+    if not text or not isinstance(text, str):
         raise SummarizationError('Ollama response did not contain text output.')
 
-    return ' '.join(text_parts).strip()
+    return text.strip()
 
 
 def _read_audio_bytes(audio_file):
