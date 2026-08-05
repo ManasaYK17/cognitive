@@ -11,11 +11,15 @@ import 'screens/face_scan_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService.initialize();
-  runApp(const CognitiveAssistApp());
+  final authService = AuthService();
+  await authService.loadPersistedToken();
+  runApp(CognitiveAssistApp(authService: authService));
 }
 
 class CognitiveAssistApp extends StatefulWidget {
-  const CognitiveAssistApp({super.key});
+  final AuthService authService;
+
+  const CognitiveAssistApp({required this.authService, super.key});
 
   @override
   State<CognitiveAssistApp> createState() => _CognitiveAssistAppState();
@@ -37,6 +41,10 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // The periodic refresh timer in AuthService can be paused by the OS
+      // while backgrounded -- catch up immediately on resume rather than
+      // waiting for its next scheduled tick.
+      widget.authService.refreshAccessToken();
       NotificationService.consumePendingKnownPersonPush();
       NotificationService.consumePendingGeofenceAlert();
     }
@@ -46,7 +54,7 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider.value(value: widget.authService),
         ChangeNotifierProvider(create: (_) => RecognitionService()),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => AudioService()),

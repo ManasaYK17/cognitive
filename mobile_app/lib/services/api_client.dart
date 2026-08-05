@@ -10,11 +10,11 @@ class ApiClient {
   static List<String> getCandidateBaseUrls({
     String apiHost = const String.fromEnvironment(
       'API_HOST',
-      defaultValue: 'https://cognitive-assist-backend.onrender.com,10.0.2.2:8000,127.0.0.1:8000',
+      defaultValue: '192.168.29.253:8000,10.0.2.2:8000,127.0.0.1:8000',
     ),
     String apiHostFallback = const String.fromEnvironment(
       'API_HOST_FALLBACK',
-      defaultValue: '192.168.1.8:8000,10.0.2.2:8000',
+      defaultValue: '192.168.29.253:8000,10.0.2.2:8000',
     ),
   }) {
     final candidates = <String>{};
