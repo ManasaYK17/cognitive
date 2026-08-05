@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <I2S.h>
+#include <ESP_I2S.h>
 #include <SD.h>
 #include <WebServer.h>
 #include "esp_camera.h"
@@ -19,7 +19,14 @@ constexpr const char *kSummarizeUrl = "http://192.168.29.253:8000/api/conversati
 constexpr const char *kTranscribeUrl = "http://192.168.29.253:8000/api/conversations/transcribe/";
 constexpr const char *kCreateFromEncounterUrl = "http://192.168.29.253:8000/api/known-people/create-from-encounter/";
 constexpr const char *kMultipartBoundary = "specsFirmwareBoundary";
-constexpr int kPdmClkPin = 42;   // Onboard PDM mic CLK (Seeed XIAO ESP32S3 Sense)
+// Onboard PDM mic (Seeed XIAO ESP32S3 Sense), read via the newer ESP_I2S.h
+// driver (arduino-esp32 3.x). Replaces the external INMP441 + legacy I2S.h
+// path: confirmed via a standalone Arduino IDE sketch that this
+// driver/library combination records and plays back cleanly at the
+// requested sample rate, with no need for the legacy I2S.h's 2x-sample-rate
+// workaround that INMP441 path required (see git history for what that
+// compensated for).
+constexpr int kPdmClkPin = 42;   // Onboard PDM mic CLK
 constexpr int kPdmDataPin = 41;  // Onboard PDM mic DATA
 // This only throttles the status Serial print for visibility -- it has no
 // effect on how often audio is actually read/written (see drainMicChunk,
@@ -32,22 +39,22 @@ constexpr uint16_t kWavBitsPerSample = 16;
 constexpr uint16_t kWavNumChannels = 1;
 
 // Software gain applied to every sample in drainMicChunk(), before
-// peak/duty-cycle calculations and before writing to the WAV -- the PDM/I2S
-// path exposes no hardware gain or amplification control (confirmed by
-// grepping the installed I2S.h/I2S.cpp and the underlying ESP-IDF
-// driver/i2s.h: no gain/amplify/scale parameter exists anywhere in the PDM
-// RX config path, only i2s_set_pdm_rx_down_sample()'s decimation-ratio
-// selector, which is unrelated to amplitude). Observed peak amplitudes have
-// been sitting around 2000-4400 out of a possible 32767, so 6x gives real
-// headroom before hitting the ceiling. Tune this if 6x turns out to be too
-// much (clipping) or too little.
+// peak/duty-cycle calculations and before writing to the WAV -- carried
+// over from the last onboard-PDM build (see main.cpp.full_backup in git
+// history), where observed peak amplitudes sat around 2000-4400 out of a
+// possible 32767 without it. NEEDS RE-VERIFICATION against this driver:
+// ESP_I2S.h talks to the PDM peripheral through a different (fixed)
+// ESP-IDF path than the old I2S.h, and its output scaling was never
+// confirmed identical. Watch /status's livePeak while talking at a normal
+// distance and adjust before trusting kNoiseFloor below.
 constexpr int32_t kMicGain = 6;
 
 // Placeholder -- needs real-world calibration against this mic/enclosure.
 // Peak amplitude threshold above which we consider "someone is talking".
 // Scaled by kMicGain (800 * 6): compared directly against post-gain samples
 // in drainMicChunk(), so it must stay calibrated relative to the same 6x
-// amplification, not the original raw mic scale.
+// amplification, not the original raw mic scale. Re-tune from /status's
+// livePeak once kMicGain itself is re-verified (see its comment above).
 constexpr int16_t kNoiseFloor = 4800;
 // How far back the rolling duty-cycle window looks when deciding what
 // fraction of recent chunks were above kNoiseFloor.
@@ -82,9 +89,9 @@ constexpr uint32_t kIdentifyDelayMsPlaceholder = 15000;
 // clean round value safely under that ceiling.
 constexpr uint16_t kConversationUploadTimeoutMs = 60000;
 
-// The I2S ring buffer is only ~32ms deep (see drainMicChunk comment below).
-// Any single loop() iteration blocking longer than this can overflow it
-// regardless of how well drainMicChunk() itself then catches up.
+// The mic driver's internal DMA buffer is shallow (see drainMicChunk
+// comment below). Any single loop() iteration blocking longer than this can
+// overflow it regardless of how well drainMicChunk() itself then catches up.
 constexpr uint32_t kSlowLoopIterationThresholdMs = 30;
 
 enum class AppState { LISTENING, RECORDING };
@@ -108,8 +115,8 @@ bool micReady = false;
 bool sdReady = false;
 File recordingFile;
 uint32_t recordingBytesWritten = 0;
-uint32_t totalBytesRead = 0;             // I2S.read() total during the open RECORDING session
-uint32_t recordingChunkCount = 0;        // count of I2S.read() calls that returned data, same session
+uint32_t totalBytesRead = 0;             // mic readBytes() total during the open RECORDING session
+uint32_t recordingChunkCount = 0;        // count of readBytes() calls that returned data, same session
 uint32_t recordingSessionStartedAtMs = 0;
 int16_t recordingPeakSinceLastPrint = 0;
 int recordingFileCounter = 0;
@@ -139,6 +146,7 @@ uint32_t maxLoopIterationUs = 0;      // longest single iteration observed
 uint32_t slowLoopIterationCount = 0;  // iterations exceeding kSlowLoopIterationThresholdMs
 
 WebServer server(80);
+I2SClass i2s;
 
 camera_config_t buildCameraConfig() {
   camera_config_t config = {};
@@ -192,7 +200,7 @@ camera_fb_t *captureOneFrame() {
 
 // TEMP diagnostic: a discarded warm-up capture, timed, to isolate whether
 // the mid-RECORDING capture failure (8s esp_camera_fb_get() stall) is
-// caused by camera coldness (first-ever capture) or by concurrent I2S mic
+// caused by camera coldness (first-ever capture) or by concurrent mic
 // activity. Called twice from setup() with different labels -- once before
 // initMic() (mic not yet active) and once right after (mic active, as it
 // will be for the rest of the device's life).
@@ -218,11 +226,11 @@ String runWarmupCapture(const char *label) {
 // Deinit+reinit the camera immediately before capturing. Confirmed via
 // prior /status-tracked testing to reliably recover capture capability
 // under the one condition that reliably breaks a direct esp_camera_fb_get()
-// call: mic actively running via I2S, deep into a RECORDING session.
-// Touches only the camera -- I2S/mic and SD are never touched. Returns
-// nullptr if either the reinit or the capture itself fails; the camera is
-// left initialized (holding the frame buffer) on success so the caller can
-// use fb->buf/fb->len before returning it and deiniting.
+// call: mic actively running, deep into a RECORDING session. Touches only
+// the camera -- mic and SD are never touched. Returns nullptr if either the
+// reinit or the capture itself fails; the camera is left initialized
+// (holding the frame buffer) on success so the caller can use
+// fb->buf/fb->len before returning it and deiniting.
 camera_fb_t *captureFrameViaReinit() {
   esp_camera_deinit();
   camera_config_t config = buildCameraConfig();
@@ -403,7 +411,10 @@ int postConversationAudio(const char *url, const String &filename, long patientI
   // recordingBytesWritten excludes the header.)
   Serial.printf("[UPLOAD] %s: WAV bytes streamed=%u, file size on disk=%u, recordingBytesWritten=%u (expect file size == recordingBytesWritten+44)\n",
                 url, (unsigned)bodyStream.fileBytesServed(), (unsigned)fileSizeBytes, (unsigned)recordingBytesWritten);
-  if (bodyStream.fileBytesServed() != fileSizeBytes) {
+  // Only meaningful once a request actually got a response -- httpCode<=0
+  // means sendRequest() never established the connection at all (e.g. WiFi
+  // down), so fileBytesServed()==0 there is expected, not a streaming bug.
+  if (httpCode > 0 && bodyStream.fileBytesServed() != fileSizeBytes) {
     Serial.println("[UPLOAD] MISMATCH: MultipartFileStream did not stream the full file -- streaming bug.");
   }
 
@@ -538,18 +549,15 @@ bool runCaptureCycle() {
 }
 
 bool initMic() {
-  I2S.setAllPins(-1, kPdmClkPin, kPdmDataPin, -1, -1);
-  // TEMP empirical test: requesting 32000 here (kWavSampleRate below is left
-  // at 16000 -- WAV header/logic untouched) to check whether the driver's
-  // actual delivered PCM rate is a fixed factor of the requested one.
-  if (!I2S.begin(PDM_MONO_MODE, 32000, 16)) {
+  i2s.setPinsPdmRx(kPdmClkPin, kPdmDataPin);
+  if (!i2s.begin(I2S_MODE_PDM_RX, kWavSampleRate, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO)) {
     Serial.println("Mic init failed.");
     return false;
   }
   // Stream::available() is the only rate-adjacent stat this library exposes
   // (no direct "effective sample rate" getter) -- printed as-is so we can
   // see whether the driver already has a backlog immediately after begin().
-  Serial.printf("I2S.available() right after begin(): %d\n", I2S.available());
+  Serial.printf("i2s.available() right after begin(): %d\n", i2s.available());
   return true;
 }
 
@@ -594,7 +602,7 @@ void writeWavHeaderPlaceholder(File &file) {
 // sample-rate/byte-rate fields (offsets 24/28), overwriting whatever
 // writeWavHeaderPlaceholder() wrote there. effectiveSampleRate comes from
 // measuring actual bytes-written-per-actual-second, not the sampleRate
-// requested from I2S.begin() -- so the header reflects reality regardless
+// requested from i2s.begin() -- so the header reflects reality regardless
 // of what the driver actually delivers.
 void finalizeWavHeader(File &file, uint32_t dataBytes, uint32_t effectiveSampleRate) {
   uint32_t chunkSize = 36 + dataBytes;
@@ -640,66 +648,65 @@ float currentDutyCyclePercent() {
   return (100.0f * dutyCycleAboveCount) / dutyCycleCount;
 }
 
-// Drains every full chunk currently sitting in the I2S ring buffer, not
-// just one -- so a single call (and therefore a single loop() iteration)
-// catches up on however much has built up since the last one, regardless
-// of loop()'s own call rate. Must be called on every loop() iteration with
-// no interval gate, in BOTH states: the ring buffer holds only ~32ms of
-// audio (128 frames x 2 DMA buffers x 2 bytes/sample x 2, per I2S.cpp), so
-// anything slower risks silently dropping audio at the driver level -- and
-// LISTENING needs continuous audio to detect sustained voice activity in
-// the first place, not just RECORDING.
+// Reads one chunk of mic samples per call, blocking briefly if the driver
+// doesn't have a full chunk ready yet (bounded by real audio production
+// time -- ~16ms for kSampleCount=256 at 16kHz mono). Called once per loop()
+// iteration in BOTH states: LISTENING needs continuous audio to detect
+// sustained voice activity in the first place, not just RECORDING.
 //
-// I2S.available() (I2S.cpp: _buffer_byte_size - xRingbufferGetCurFreeSize
-// (_input_ring_buffer)) is a genuinely non-blocking bytes-ready query -- it
-// never calls into read()'s xRingbufferReceiveUpTo() or its internal 1000ms
-// timeout. Gating every read() behind "a full chunk is already sitting
-// there" guarantees read() always has its whole request ready and returns
-// immediately, instead of a naive "loop read() until 0" drain risking a
-// multi-second stall the moment the buffer runs dry mid-loop. The loop
-// stops the instant less than one full chunk remains available; that
-// remainder stays in the ring buffer for the next call to pick up rather
-// than forcing a short read of it now.
+// Deliberately NOT gated on i2s.available(): confirmed via the installed
+// ESP_I2S.h/.cpp source (I2SClass::available(), ESP_I2S.cpp) that this
+// driver always returns a fixed constant (I2S_READ_CHUNK_SIZE, 1920)
+// regardless of how much data is actually queued -- unlike the legacy
+// I2S.h library, it is not a real "bytes ready" query. A `while
+// (i2s.available() >= kBufferBytes)` guard around readBytes() (as an
+// earlier version of this function had) therefore never goes false,
+// permanently trapping loop() inside this function on its very first call
+// -- symptom: one boot-time IP print, then nothing ever again, no
+// voice-activity detection, no state transitions, no periodic status
+// prints, regardless of what's happening at the mic.
+//
+// PDM_RX + I2S_SLOT_MODE_MONO delivers one 16-bit signed sample per frame
+// directly -- no interleaved Left/Right slots to de-interleave and no raw
+// 32-bit words to shift, unlike the external-INMP441 (standard I2S,
+// stereo-framed) path this replaced.
 void drainMicChunk(uint32_t now) {
   constexpr size_t kSampleCount = 256;
   constexpr size_t kBufferBytes = kSampleCount * sizeof(int16_t);
   int16_t samples[kSampleCount];
 
-  while (I2S.available() >= (int)kBufferBytes) {
-    int got = I2S.read(samples, kBufferBytes);
-    if (got <= 0) break;  // shouldn't happen given the guard above, but don't spin if it does
-    size_t bytesRead = static_cast<size_t>(got);
-    size_t samplesRead = bytesRead / sizeof(int16_t);
+  size_t got = i2s.readBytes((char *)samples, kBufferBytes);
+  if (got == 0) return;
+  size_t samplesRead = got / sizeof(int16_t);
 
-    int16_t peak = 0;
-    for (size_t i = 0; i < samplesRead; i++) {
-      // Apply gain in place, before peak/duty-cycle calculations use the
-      // sample and before it's written to the WAV below -- so voice-
-      // activity detection benefits too, not just the recording. Clamp
-      // rather than let it silently wrap: wraparound would flip a loud
-      // positive sample into a large negative one (or vice versa), producing
-      // harsh clipping distortion that could make transcription worse than
-      // doing nothing.
-      int32_t amplified = (int32_t)samples[i] * kMicGain;
-      if (amplified > INT16_MAX) amplified = INT16_MAX;
-      if (amplified < INT16_MIN) amplified = INT16_MIN;
-      samples[i] = (int16_t)amplified;
+  int16_t peak = 0;
+  for (size_t i = 0; i < samplesRead; i++) {
+    // Apply gain in place, before peak/duty-cycle calculations use the
+    // sample and before it's written to the WAV below -- so voice-
+    // activity detection benefits too, not just the recording. Clamp
+    // rather than let it silently wrap: wraparound would flip a loud
+    // positive sample into a large negative one (or vice versa), producing
+    // harsh clipping distortion that could make transcription worse than
+    // doing nothing.
+    int32_t amplified = (int32_t)samples[i] * kMicGain;
+    if (amplified > INT16_MAX) amplified = INT16_MAX;
+    if (amplified < INT16_MIN) amplified = INT16_MIN;
+    samples[i] = (int16_t)amplified;
 
-      int16_t absSample = samples[i] < 0 ? (int16_t)(-samples[i]) : samples[i];
-      if (absSample > peak) peak = absSample;
-      if (absSample > recordingPeakSinceLastPrint) recordingPeakSinceLastPrint = absSample;
-    }
-
-    if (recordingFile) {
-      totalBytesRead += bytesRead;
-      recordingChunkCount++;
-      size_t written = recordingFile.write((const uint8_t *)samples, bytesRead);
-      recordingBytesWritten += written;
-    }
-
-    recordDutyCycleSample(now, peak >= kNoiseFloor);
-    realChunksSinceLastPrint++;
+    int16_t absSample = samples[i] < 0 ? (int16_t)(-samples[i]) : samples[i];
+    if (absSample > peak) peak = absSample;
+    if (absSample > recordingPeakSinceLastPrint) recordingPeakSinceLastPrint = absSample;
   }
+
+  if (recordingFile) {
+    totalBytesRead += got;
+    recordingChunkCount++;
+    size_t written = recordingFile.write((const uint8_t *)samples, got);
+    recordingBytesWritten += written;
+  }
+
+  recordDutyCycleSample(now, peak >= kNoiseFloor);
+  realChunksSinceLastPrint++;
 }
 
 // Purely for visibility -- throttled separately from drainMicChunk() so
@@ -770,7 +777,7 @@ void exitRecording() {
     uint32_t durationMs = millis() - recordingSessionStartedAtMs;
     // Measured, not requested: real bytes actually written divided by real
     // elapsed time, so the header is correct regardless of what sample rate
-    // the I2S/PDM driver actually delivers versus what was requested.
+    // the mic driver actually delivers versus what was requested.
     double effectiveRateExact =
         durationMs > 0 ? (double)totalBytesRead / (durationMs / 1000.0) / (kWavBitsPerSample / 8)
                         : (double)kWavSampleRate;
@@ -854,7 +861,13 @@ void handleLatestWav() {
 // captures and the last mid-RECORDING identify attempt -- avoids needing a
 // serial monitor to be attached at the exact right moment during boot.
 void handleStatus() {
-  String body = "warmup1 (mic off): " + warmup1ResultText + "\n" +
+  // TEMP: livePeak -- for validating kNoiseFloor/kMicGain against real
+  // quiet/talk numbers over HTTP, avoiding a serial monitor (whose
+  // disconnect hard-resets the board via RTS, wiping this exact state).
+  // Mirrors recordingPeakSinceLastPrint, which printStatus() already resets
+  // once/sec, so this reflects roughly the last ~1s window.
+  String body = "livePeak: " + String(recordingPeakSinceLastPrint) + "\n" +
+                "warmup1 (mic off): " + warmup1ResultText + "\n" +
                 "warmup2 (mic on): " + warmup2ResultText + "\n" +
                 "identifyAttempted: " + String(identifyAttempted ? "true" : "false") + "\n" +
                 "lastIdentifyMatch: " + String(lastIdentifyMatch ? "true" : "false") + "\n" +
@@ -925,6 +938,19 @@ void loop() {
     lastPrint = now;
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+    // WiFi.begin() in setup() only connects once -- nothing else here ever
+    // rechecks the link, so a drop (router hiccup, signal loss, DHCP lease
+    // issue) previously left the device silently offline until manually
+    // power-cycled (confirmed: "IP address: 0.0.0.0" followed by every
+    // subsequent upload failing with "connection refused"). Piggybacks on
+    // the same interval as the IP print above rather than its own timer --
+    // reconnect() is safe to call repeatedly while already
+    // connecting/connected, so no extra state is needed to avoid spamming
+    // it.
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[WIFI] Not connected -- attempting reconnect...");
+      WiFi.reconnect();
+    }
   }
 
   server.handleClient();
@@ -961,9 +987,9 @@ void loop() {
                     (unsigned long)(now - recordingSessionStartedAtMs));
       // Deinit+reinit immediately before capturing, not a direct
       // esp_camera_fb_get() call -- confirmed necessary: mic is actively
-      // running via I2S at this point (deep into RECORDING), the one
-      // condition that reliably breaks a direct capture. I2S/mic and SD
-      // are never touched by this.
+      // running at this point (deep into RECORDING), the one condition that
+      // reliably breaks a direct capture. Mic and SD are never touched by
+      // this.
       camera_fb_t *fb = captureFrameViaReinit();
       if (fb) {
         // Copy the JPEG out before returning the frame buffer / deiniting
