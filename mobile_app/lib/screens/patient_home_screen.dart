@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
+import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/recognition_service.dart';
 import '../theme/design_tokens.dart';
 import '../widgets/face_scan_camera.dart';
+import 'caregiver_dashboard_screen.dart';
 import 'caregiver_login_screen.dart';
 import 'patient_history_screen.dart';
 import 'patient_recognition_result_screen.dart';
@@ -32,8 +34,15 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   @override
   void initState() {
     super.initState();
-    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
-    recognitionService.clearRecognizedPerson();
+    // Deferred to after this build completes -- RecognitionService's
+    // provider scope is an ancestor of this screen, and clearing it here
+    // notifies listeners synchronously while that ancestor scope (and this
+    // widget's own mounting) is still part of the current build pass,
+    // which Flutter disallows ("setState() called during build").
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Provider.of<RecognitionService>(context, listen: false).clearRecognizedPerson();
+    });
     _loadRecentMemories();
     unawaited(_initializeTts());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -65,6 +74,30 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
       return;
     }
     setState(() => _loadingMemories = false);
+  }
+
+  Future<void> _confirmExitPatientMode() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Exit patient mode?'),
+        content: const Text('This closes the patient screen and returns to caregiver sign-in.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Exit')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final authService = Provider.of<AuthService>(context, listen: false);
+    authService.clearPatientSessionToken();
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => authService.accessToken != null ? const CaregiverDashboardScreen() : const CaregiverLoginScreen(),
+      ),
+      (route) => false,
+    );
   }
 
   Future<void> _prepareLocationReporting() async {
@@ -235,14 +268,26 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white70),
+            tooltip: 'Exit to caregiver sign-in',
+            onPressed: _confirmExitPatientMode,
+          ),
+        ],
+      ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           child: Column(
             children: [
               Text(statusText, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white)),
               const SizedBox(height: 16),
-              Expanded(child: Center(child: _buildScanCard())),
+              _buildScanCard(),
               const SizedBox(height: 20),
               const SizedBox(height: 12),
               OutlinedButton(

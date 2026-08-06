@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'theme/design_tokens.dart';
+import 'services/api_client.dart';
 import 'services/auth_service.dart';
 import 'services/recognition_service.dart';
 import 'services/notification_service.dart';
@@ -12,6 +13,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService.initialize();
   final authService = AuthService();
+  ApiClient.onUnauthorized = authService.forceLogout;
   await authService.loadPersistedToken();
   runApp(CognitiveAssistApp(authService: authService));
 }
@@ -30,12 +32,32 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.authService.addListener(_handleAuthChange);
   }
 
   @override
   void dispose() {
+    widget.authService.removeListener(_handleAuthChange);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _handleAuthChange() {
+    if (!widget.authService.sessionExpired) return;
+    widget.authService.acknowledgeSessionExpired();
+
+    final navigator = NotificationService.navigatorKey.currentState;
+    navigator?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const FaceScanScreen()),
+      (route) => false,
+    );
+
+    final context = NotificationService.navigatorKey.currentContext;
+    if (context != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your session expired. Please sign in again.')),
+      );
+    }
   }
 
   @override

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../widgets/face_scan_camera.dart';
+import 'history_dashboard_screen.dart';
 
 class KnownPersonDetailScreen extends StatefulWidget {
   final int? personId;
@@ -154,8 +155,28 @@ class _KnownPersonDetailScreenState extends State<KnownPersonDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title:
-              Text(widget.personId == null ? 'New Contact' : 'Edit Contact')),
+        title: Text(widget.personId == null ? 'New Contact' : 'Edit Contact'),
+        actions: [
+          if (widget.personId != null)
+            IconButton(
+              icon: const Icon(Icons.history),
+              tooltip: 'View history',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => HistoryDashboardScreen(
+                      patientId: widget.patientId,
+                      knownPersonId: widget.personId,
+                      knownPersonName: _nameController.text.trim().isEmpty
+                          ? null
+                          : _nameController.text.trim(),
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(

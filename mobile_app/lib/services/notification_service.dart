@@ -37,6 +37,14 @@ class NotificationService {
       await Firebase.initializeApp();
     }
 
+    // Required on Android 13+ (POST_NOTIFICATIONS) and iOS for any
+    // notification -- local or FCM -- to actually be shown to the user.
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosSettings = DarwinInitializationSettings();
     await _localNotifications.initialize(

@@ -53,7 +53,7 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
       await Geolocator.requestPermission();
     }
     if (!await Geolocator.isLocationServiceEnabled()) {
-      _showError('Location services are disabled. Please enable them to use current location.');
+      _showLocationServicesDisabledError();
       setState(() => _loading = false);
       return;
     }
@@ -105,6 +105,24 @@ class _SafeZoneScreenState extends State<SafeZoneScreen> {
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // Distinct from the app's own location permission (Settings > Apps > this
+  // app > Permissions): this is the phone's device-wide Location toggle,
+  // which the app can't turn on for the user -- only send them to the
+  // system screen that does.
+  void _showLocationServicesDisabledError() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Location services are turned off on this device.'),
+        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          label: 'Open settings',
+          onPressed: () => Geolocator.openLocationSettings(),
+        ),
+      ),
+    );
   }
 
   @override

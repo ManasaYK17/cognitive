@@ -11,7 +11,11 @@ class PatientModeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final recognitionService = Provider.of<RecognitionService>(context);
+    // listen: false -- this build only reads current values to configure
+    // the child screen once; watching RecognitionService here would rebuild
+    // this whole MultiProvider (and remount its children) on every
+    // recognition attempt.
+    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
     final authService = Provider.of<AuthService>(context, listen: false);
     final sessionToken = authService.patientSessionToken;
     final patientId = recognitionService.patientId ?? 0;

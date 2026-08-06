@@ -299,18 +299,28 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
     required Color valueColor,
   }) {
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(color: valueColor.withAlpha(230), fontSize: 13, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 18),
-          Text(value, style: TextStyle(color: valueColor, fontSize: 32, fontWeight: FontWeight.w900)),
+          Text(
+            title,
+            style: TextStyle(color: valueColor.withAlpha(230), fontSize: 13, fontWeight: FontWeight.w600),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 14),
+          Text(
+            value,
+            style: TextStyle(color: valueColor, fontSize: 30, fontWeight: FontWeight.w900),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
@@ -328,15 +338,17 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
     );
   }
 
-  Widget _buildMetricGrid({required List<Widget> children}) {
-    return GridView.count(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      crossAxisCount: 2,
-      crossAxisSpacing: 16,
-      mainAxisSpacing: 16,
-      childAspectRatio: 2.1,
-      children: children,
+  Widget _buildMetricRow({required List<Widget> children}) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (int i = 0; i < children.length; i++) ...[
+            if (i > 0) const SizedBox(width: 16),
+            Expanded(child: children[i]),
+          ],
+        ],
+      ),
     );
   }
 
@@ -423,11 +435,15 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
     final statusInside = safeZone['inside'] as bool? ?? false;
     final statusConfigured = safeZone['configured'] as bool? ?? false;
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = screenWidth < 400 ? 16.0 : 26.0;
+    final barWidth = screenWidth < 400 ? 14.0 : 18.0;
+
     return Container(
       color: const Color(0xFF0A0F1D),
       child: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 26.0, vertical: 24.0),
+          padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -439,7 +455,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
               const SizedBox(height: 22),
               const Text('Today\'s detections', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
               const SizedBox(height: 12),
-              _buildMetricGrid(
+              _buildMetricRow(
                 children: [
                   _buildMetricCard(
                     title: 'Known people',
@@ -456,7 +472,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                 ],
               ),
               const SizedBox(height: 16),
-              _buildMetricGrid(
+              _buildMetricRow(
                 children: [
                   _buildMetricCard(
                     title: 'Conversations saved',
@@ -517,7 +533,7 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                                 BarChartRodData(
                                   toY: count,
                                   color: const Color(0xFF10B981),
-                                  width: 18,
+                                  width: barWidth,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ],
@@ -531,46 +547,67 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
               ),
               const SizedBox(height: 22),
               _buildSectionCard(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 180,
-                      height: 180,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final pieSize = constraints.maxWidth < 360
+                        ? constraints.maxWidth * 0.42
+                        : 180.0;
+                    final pie = SizedBox(
+                      width: pieSize,
+                      height: pieSize,
                       child: PieChart(
                         PieChartData(
                           sectionsSpace: 2,
-                          centerSpaceRadius: 48,
+                          centerSpaceRadius: pieSize * 0.27,
                           sections: [
                             PieChartSectionData(
                               color: const Color(0xFF10B981),
                               value: knownPercent,
                               title: '',
-                              radius: 56,
+                              radius: pieSize * 0.31,
                             ),
                             PieChartSectionData(
                               color: const Color(0xFFF59E0B),
                               value: unknownPercent,
                               title: '',
-                              radius: 56,
+                              radius: pieSize * 0.31,
                             ),
                           ],
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      child: Column(
+                    );
+                    final legend = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Known vs unknown, this week', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 14),
+                        _buildLegendItem(label: 'Known', percent: knownPercent, color: const Color(0xFF10B981)),
+                        const SizedBox(height: 10),
+                        _buildLegendItem(label: 'Unknown', percent: unknownPercent, color: const Color(0xFFF59E0B)),
+                      ],
+                    );
+
+                    if (constraints.maxWidth < 320) {
+                      return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Known vs unknown, this week', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 14),
-                          _buildLegendItem(label: 'Known', percent: knownPercent, color: const Color(0xFF10B981)),
-                          const SizedBox(height: 10),
-                          _buildLegendItem(label: 'Unknown', percent: unknownPercent, color: const Color(0xFFF59E0B)),
+                          Center(child: pie),
+                          const SizedBox(height: 18),
+                          legend,
                         ],
-                      ),
-                    ),
-                  ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        pie,
+                        const SizedBox(width: 20),
+                        Expanded(child: legend),
+                      ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 22),

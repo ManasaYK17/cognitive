@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'api_client.dart';
 
 class LocationService extends ChangeNotifier {
@@ -13,22 +14,28 @@ class LocationService extends ChangeNotifier {
   Timer? _reportTimer;
 
   Future<void> initialize() async {
-    final permission = await Geolocator.checkPermission();
-    _updatePermissionFlags(permission);
+    final status = await Permission.locationAlways.status;
+    _updatePermissionFlags(status);
   }
 
+  /// Background ("always") location can't be granted in a single dialog on
+  /// Android 10+ -- the OS only offers it once foreground access is already
+  /// granted, so foreground is requested first and background second.
   Future<void> requestPermission() async {
-    final permission = await Geolocator.requestPermission();
-    _updatePermissionFlags(permission);
+    var status = await Permission.locationWhenInUse.request();
+    if (status.isGranted) {
+      status = await Permission.locationAlways.request();
+    }
+    _updatePermissionFlags(status);
     if (permissionGranted) {
       notifyListeners();
     }
   }
 
-  void _updatePermissionFlags(LocationPermission permission) {
-    permissionGranted = permission == LocationPermission.always;
-    permissionDenied = permission == LocationPermission.denied;
-    permissionPermanentlyDenied = permission == LocationPermission.deniedForever;
+  void _updatePermissionFlags(PermissionStatus status) {
+    permissionGranted = status.isGranted;
+    permissionDenied = status.isDenied || status.isRestricted;
+    permissionPermanentlyDenied = status.isPermanentlyDenied;
     notifyListeners();
   }
 

@@ -7,6 +7,29 @@ import 'package:http/http.dart' as http;
 class ApiClient {
   static const timeoutDuration = Duration(seconds: 10);
 
+  // Set once at startup (see main.dart) to AuthService.forceLogout. Fired
+  // whenever an authenticated request comes back 401, since that means the
+  // token was rejected -- expired or cleared server-side -- not that this
+  // particular call happened to fail.
+  static void Function()? onUnauthorized;
+
+  // Auth endpoints legitimately return 401 as part of normal flow (wrong
+  // password, refresh token past its own lifetime) and handle it themselves
+  // -- routing those through onUnauthorized too would either fire during a
+  // failed login attempt or double up with AuthService's own handling.
+  static const _unauthorizedExemptPaths = {
+    '/accounts/login/',
+    '/accounts/register/',
+    '/accounts/token/refresh/',
+  };
+
+  void _reportIfUnauthorized(String path, String? token, http.Response response) {
+    if (response.statusCode != 401) return;
+    if (token == null || token.isEmpty) return;
+    if (_unauthorizedExemptPaths.contains(path)) return;
+    onUnauthorized?.call();
+  }
+
   static List<String> getCandidateBaseUrls({
     String apiHost = const String.fromEnvironment(
       'API_HOST',
@@ -61,7 +84,7 @@ class ApiClient {
       headers['Authorization'] = 'Bearer $token';
     }
 
-    return _sendWithFallback(
+    final response = await _sendWithFallback(
       (String baseUri) async {
         return http
             .post(
@@ -74,6 +97,8 @@ class ApiClient {
       path: path,
       method: 'POST',
     );
+    _reportIfUnauthorized(path, token, response);
+    return response;
   }
 
   Future<http.Response> get(
@@ -81,7 +106,7 @@ class ApiClient {
     String? token,
     Map<String, String>? params,
   }) async {
-    return _sendWithFallback(
+    final response = await _sendWithFallback(
       (String baseUri) async {
         final uri = Uri.parse('$baseUri$path').replace(queryParameters: params);
         final headers = <String, String>{
@@ -92,6 +117,8 @@ class ApiClient {
       path: path,
       method: 'GET',
     );
+    _reportIfUnauthorized(path, token, response);
+    return response;
   }
 
   Future<http.Response> put(
@@ -106,7 +133,7 @@ class ApiClient {
       headers['Authorization'] = 'Bearer $token';
     }
 
-    return _sendWithFallback(
+    final response = await _sendWithFallback(
       (String baseUri) async {
         return http
             .put(
@@ -119,6 +146,8 @@ class ApiClient {
       path: path,
       method: 'PUT',
     );
+    _reportIfUnauthorized(path, token, response);
+    return response;
   }
 
   Future<http.Response> sendMultipart(
@@ -128,7 +157,7 @@ class ApiClient {
     Map<String, String>? fields,
     List<http.MultipartFile> files = const [],
   }) async {
-    return _sendWithFallback(
+    final response = await _sendWithFallback(
       (String baseUri) async {
         final uri = Uri.parse('$baseUri$path');
         final request = http.MultipartRequest(method, uri);
@@ -147,6 +176,8 @@ class ApiClient {
       path: path,
       method: method.toUpperCase(),
     );
+    _reportIfUnauthorized(path, token, response);
+    return response;
   }
 
   http.MultipartRequest multipartRequest(String method, String path,

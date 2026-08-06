@@ -6,8 +6,15 @@ import '../services/auth_service.dart';
 
 class HistoryDashboardScreen extends StatefulWidget {
   final int? patientId;
+  final int? knownPersonId;
+  final String? knownPersonName;
 
-  const HistoryDashboardScreen({this.patientId, super.key});
+  const HistoryDashboardScreen({
+    this.patientId,
+    this.knownPersonId,
+    this.knownPersonName,
+    super.key,
+  });
 
   @override
   State<HistoryDashboardScreen> createState() => _HistoryDashboardScreenState();
@@ -32,6 +39,7 @@ class _HistoryDashboardScreenState extends State<HistoryDashboardScreen> {
     final token = Provider.of<AuthService>(context, listen: false).accessToken;
     final response = await _api.get('/history/', token: token, params: {
       if (widget.patientId != null) 'patient_id': widget.patientId.toString(),
+      if (widget.knownPersonId != null) 'known_person_id': widget.knownPersonId.toString(),
       if (search != null && search.isNotEmpty) 'search': search,
     });
     if (response.statusCode == 200) {
@@ -49,7 +57,9 @@ class _HistoryDashboardScreenState extends State<HistoryDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('History')),
+      appBar: AppBar(
+        title: Text(widget.knownPersonName != null ? '${widget.knownPersonName}\'s history' : 'History'),
+      ),
       body: Column(
         children: [
           Padding(

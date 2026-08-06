@@ -2,6 +2,21 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Needed for reporting the patient's live location and safe-zone
+         (geofence) checks. Background location requires fine/coarse to be
+         granted first (Android 10+ two-step flow), and apps targeting
+         Android 14 (API 34) must declare the specific foreground-service
+         type permission alongside the general one. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!-- Required on Android 13+ (API 33) for FCM/local notifications to be
+         shown at all; the runtime prompt only appears if this is declared. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="cognitive_assist_app"
         android:name="${applicationName}"

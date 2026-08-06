@@ -26,6 +26,13 @@ class AuthService extends ChangeNotifier {
   String? _lastError;
   String? get lastError => _lastError;
 
+  // Set when a request comes back 401 with a token attached (or the refresh
+  // token itself is rejected) -- the app shell listens for this and
+  // navigates back to the login flow, since a silently-cleared session
+  // otherwise just leaves every screen re-fetching into empty states.
+  bool sessionExpired = false;
+  bool _forcingLogout = false;
+
   final ApiClient _client = ApiClient();
 
   AuthService() {
@@ -49,6 +56,14 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
     _registerPatientDeviceToken();
     NotificationService.consumePendingKnownPersonPush();
+  }
+
+  // Exits patient kiosk mode without touching the caregiver's own
+  // access/refresh tokens -- unlike logout(), a caregiver who was already
+  // signed in should land back on their dashboard, not be signed out too.
+  void clearPatientSessionToken() {
+    _patientSessionToken = null;
+    notifyListeners();
   }
 
   // Restores a caregiver session saved by a previous run -- without this,
@@ -111,7 +126,7 @@ class AuthService extends ChangeNotifier {
           return true;
         }
       } else if (response.statusCode == 401) {
-        await logout();
+        await forceLogout();
       }
       return false;
     } catch (error) {
@@ -207,6 +222,24 @@ class AuthService extends ChangeNotifier {
     _patientSessionToken = null;
     await _persistTokens(access: null, refresh: null);
     notifyListeners();
+  }
+
+  // Called when the backend rejects a request as unauthorized -- expired or
+  // cleared token -- rather than the user tapping "Log out" themselves.
+  // Clears the session and flips `sessionExpired` so the app shell can
+  // navigate back to the login flow and let the user know why.
+  Future<void> forceLogout() async {
+    if (_forcingLogout) return;
+    if (_accessToken == null && _refreshToken == null && _patientSessionToken == null) return;
+    _forcingLogout = true;
+    await logout();
+    sessionExpired = true;
+    notifyListeners();
+    _forcingLogout = false;
+  }
+
+  void acknowledgeSessionExpired() {
+    sessionExpired = false;
   }
 
   Future<void> _registerDeviceToken() async {
