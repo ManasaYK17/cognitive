@@ -15,6 +15,9 @@ media/
 .env
 secrets/
 
+# Logs (contain raw request bodies, including plaintext passwords)
+logs/
+
 # Editor
 .vscode/
 .idea/

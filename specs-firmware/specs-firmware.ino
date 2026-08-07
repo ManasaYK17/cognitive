@@ -14,10 +14,10 @@ namespace {
 constexpr uint32_t kIpPrintIntervalMs = 5000;
 constexpr size_t kMinJpegBytes = 4000;     // suspiciously small -> likely blank frame
 constexpr double kMinByteVariance = 300.0; // suspiciously flat -> likely blank/blurred
-constexpr const char *kIdentifyUrl = "http://192.168.29.253:8000/api/recognition/identify-known-person/";
-constexpr const char *kSummarizeUrl = "http://192.168.29.253:8000/api/conversations/summarize/";
-constexpr const char *kTranscribeUrl = "http://192.168.29.253:8000/api/conversations/transcribe/";
-constexpr const char *kCreateFromEncounterUrl = "http://192.168.29.253:8000/api/known-people/create-from-encounter/";
+constexpr const char *kIdentifyUrl = "http://10.80.46.169:8000/api/recognition/identify-known-person/";
+constexpr const char *kSummarizeUrl = "http://10.80.46.169:8000/api/conversations/summarize/";
+constexpr const char *kTranscribeUrl = "http://10.80.46.169:8000/api/conversations/transcribe/";
+constexpr const char *kCreateFromEncounterUrl = "http://10.80.46.169:8000/api/known-people/create-from-encounter/";
 constexpr const char *kMultipartBoundary = "specsFirmwareBoundary";
 // Onboard PDM mic (Seeed XIAO ESP32S3 Sense), read via the newer ESP_I2S.h
 // driver (arduino-esp32 3.x). Replaces the external INMP441 + legacy I2S.h

@@ -5,6 +5,7 @@ import numpy as np
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.signing import dumps, loads
 from django.utils import timezone
 from rest_framework import status, views
@@ -279,6 +280,20 @@ class IdentifyKnownPersonView(views.APIView):
             return Response({'detail': 'An image is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         image = self._coerce_image(image)
+
+        # TEMP debug: this pipeline only ever holds the uploaded frame in memory
+        # for encoding, so there was previously no way to see what the specs
+        # hardware actually captured. Stash a copy under media/debug_captures/
+        # for inspection; harmless if it fails (image processing still proceeds).
+        try:
+            image.seek(0)
+            debug_name = default_storage.save(
+                f"debug_captures/{timezone.now():%Y%m%d_%H%M%S_%f}.jpg", image
+            )
+            image.seek(0)
+            print(f"[DEBUG] Saved identify capture to media/{debug_name}")
+        except Exception as exc:
+            print(f"[DEBUG] Failed to save identify capture: {exc}")
 
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''

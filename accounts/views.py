@@ -1,4 +1,4 @@
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -33,7 +33,19 @@ class CaregiverRegisterView(generics.CreateAPIView):
                 f.write(json.dumps(entry) + '\n')
         except Exception:
             pass
-        return super().create(request, *args, **kwargs)
+
+        # Issue tokens on signup too, matching CaregiverLoginView -- otherwise the
+        # mobile app (which reads 'access'/'refresh' straight off the register
+        # response) is left with a null access token and every request right
+        # after signup silently goes out unauthenticated.
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        caregiver = serializer.save()
+        refresh = RefreshToken.for_user(caregiver)
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }, status=status.HTTP_201_CREATED)
 
 
 class CaregiverLoginView(APIView):
