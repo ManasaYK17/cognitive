@@ -14,10 +14,10 @@ namespace {
 constexpr uint32_t kIpPrintIntervalMs = 5000;
 constexpr size_t kMinJpegBytes = 4000;     // suspiciously small -> likely blank frame
 constexpr double kMinByteVariance = 300.0; // suspiciously flat -> likely blank/blurred
-constexpr const char *kIdentifyUrl = "http://192.168.29.253:8000/api/recognition/identify-known-person/";
-constexpr const char *kSummarizeUrl = "http://192.168.29.253:8000/api/conversations/summarize/";
-constexpr const char *kTranscribeUrl = "http://192.168.29.253:8000/api/conversations/transcribe/";
-constexpr const char *kCreateFromEncounterUrl = "http://192.168.29.253:8000/api/known-people/create-from-encounter/";
+constexpr const char *kIdentifyUrl = "http://10.204.67.169:8000/api/recognition/identify-known-person/";
+constexpr const char *kSummarizeUrl = "http://10.204.67.169:8000/api/conversations/summarize/";
+constexpr const char *kTranscribeUrl = "http://10.204.67.169:8000/api/conversations/transcribe/";
+constexpr const char *kCreateFromEncounterUrl = "http://10.204.67.169:8000/api/known-people/create-from-encounter/";
 constexpr const char *kMultipartBoundary = "specsFirmwareBoundary";
 // Onboard PDM mic (Seeed XIAO ESP32S3 Sense), read via the newer ESP_I2S.h
 // driver (arduino-esp32 3.x). Replaces the external INMP441 + legacy I2S.h
@@ -88,6 +88,11 @@ constexpr uint32_t kIdentifyDelayMsPlaceholder = 15000;
 // uint16_t, so anything above 65535 silently wraps -- 60000 is the largest
 // clean round value safely under that ceiling.
 constexpr uint16_t kConversationUploadTimeoutMs = 60000;
+// Same 5000ms-default problem as above, hit by identifyKnownPerson() and
+// postCreateFromEncounter(): InsightFace inference on the server's CPU plus
+// the image upload itself can exceed the default even on a warm model, and
+// this is on the hot path fired repeatedly during a conversation.
+constexpr uint16_t kRecognitionTimeoutMs = 15000;
 
 // The mic driver's internal DMA buffer is shallow (see drainMicChunk
 // comment below). Any single loop() iteration blocking longer than this can
@@ -282,6 +287,7 @@ bool identifyKnownPerson(camera_fb_t *fb, String &outName, String &outRelationsh
 
   HTTPClient http;
   http.begin(kIdentifyUrl);
+  http.setTimeout(kRecognitionTimeoutMs);
   http.addHeader("Content-Type", String("multipart/form-data; boundary=") + kMultipartBoundary);
   http.addHeader("Authorization", String("Bearer ") + deviceAuthToken);
 
@@ -492,6 +498,7 @@ bool postCreateFromEncounter(const uint8_t *imageBytes, size_t imageLength, cons
 
   HTTPClient http;
   http.begin(kCreateFromEncounterUrl);
+  http.setTimeout(kRecognitionTimeoutMs);
   http.addHeader("Content-Type", String("multipart/form-data; boundary=") + kMultipartBoundary);
   http.addHeader("Authorization", String("Bearer ") + deviceAuthToken);
 
