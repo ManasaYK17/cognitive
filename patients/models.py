@@ -24,6 +24,23 @@ class Patient(models.Model):
         return self.name
 
 
+class PatientDevice(models.Model):
+    """Links a physical device (identified by a stable hardware id, e.g. a
+    WiFi MAC address) to the patient it acts on behalf of. Lets hardware
+    like the specs firmware authenticate without a signed session token
+    baked in at compile time -- those go stale whenever the patient's
+    database row changes (e.g. after a data reset), since they're just an
+    auto-incrementing id. A MAC address never changes, so once a device is
+    registered here it keeps working across resets."""
+    device_id = models.CharField(max_length=255, unique=True)
+    patient = models.ForeignKey(Patient, related_name='devices', on_delete=models.CASCADE)
+    label = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.device_id} -> {self.patient.name}'
+
+
 class FaceImage(models.Model):
     subject_type = models.CharField(max_length=20, choices=[('patient', 'Patient'), ('known_person', 'Known Person')])
     patient_subject = models.ForeignKey(Patient, null=True, blank=True, related_name='face_images', on_delete=models.CASCADE)

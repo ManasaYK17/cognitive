@@ -122,7 +122,15 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-RECOGNITION_CONFIDENCE_THRESHOLD = 0.45
+# Raw cosine similarity against InsightFace's ArcFace embeddings (the
+# primary encoder). Benchmarked directly on real photos from this app:
+# same person ~0.88-0.96, different people ~0.18-0.24 -- 0.5 sits well
+# clear of both clusters.
+RECOGNITION_CONFIDENCE_THRESHOLD = 0.5
+# The best-scoring candidate must beat the runner-up by at least this much,
+# not just clear the threshold above -- otherwise two similar-looking
+# people can produce near-tied scores and get confidently mismatched.
+RECOGNITION_MATCH_MARGIN = 0.1
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL_NAME = os.environ.get('OLLAMA_MODEL_NAME', 'qwen2.5:7b')
 OPENROUTER_API_URL = os.environ.get('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')

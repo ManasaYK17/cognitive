@@ -1,12 +1,12 @@
 from django.contrib.contenttypes.models import ContentType
-from django.core.signing import loads
 from rest_framework import generics, permissions, status, views
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from .models import KnownPerson
 from .serializers import KnownPersonSerializer
 from .permissions import IsCaregiverForKnownPerson
-from patients.models import FaceImage, Patient
+from patients.auth import resolve_patient_from_token
+from patients.models import FaceImage
 from patients.serializers import FaceImageSerializer
 from conversations.models import ConversationHistory
 from conversations.views import DeviceScopedRateThrottle
@@ -106,13 +106,8 @@ class KnownPersonCreateFromEncounterView(views.APIView):
         if not token:
             return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        try:
-            payload = loads(token)
-        except Exception:
-            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        patient = Patient.objects.filter(id=payload.get('patient_id')).first()
-        if patient is None or str(payload.get('patient_id')) != str(patient_id):
+        patient = resolve_patient_from_token(token)
+        if patient is None or str(patient.id) != str(patient_id):
             return Response({'detail': 'Token patient_id does not match request patient_id.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         known_person = KnownPerson.objects.create(

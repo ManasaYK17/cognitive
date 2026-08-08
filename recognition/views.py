@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.core.signing import dumps, loads
+from django.core.signing import dumps
 from django.utils import timezone
 from rest_framework import status, views
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -17,11 +17,20 @@ from rest_framework.throttling import SimpleRateThrottle
 from accounts.serializers import DeviceTokenRegistrationSerializer
 from geofencing.services import send_fcm_push
 from history.models import RecognitionHistory
+from patients.auth import resolve_patient_from_token
 from patients.models import FaceImage, Patient
 from known_people.models import KnownPerson
 from conversations.models import ConversationHistory
 from .models import FaceEncoding
-from .services import LowQualityImageError, MultipleFacesDetectedError, NoFaceDetectedError, _load_pil_image, detect_face, generate_encoding
+from .services import (
+    LowQualityImageError,
+    MultipleFacesDetectedError,
+    NoFaceDetectedError,
+    _load_pil_image,
+    compute_similarity,
+    detect_face,
+    generate_encoding,
+)
 
 
 class DeviceScopedRateThrottle(SimpleRateThrottle):
@@ -68,13 +77,8 @@ class RegisterPatientDeviceTokenView(views.APIView):
         token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
         if not token:
             return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
-        try:
-            payload = loads(token)
-        except Exception:
-            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        patient_id = payload.get('patient_id') if isinstance(payload, dict) else None
-        patient = Patient.objects.filter(id=patient_id).first() if patient_id else None
+        patient = resolve_patient_from_token(token)
         if patient is None:
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -134,26 +138,34 @@ class IdentifyPatientView(views.APIView):
         except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.55)
+        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.5)
+        match_margin = getattr(settings, 'RECOGNITION_MATCH_MARGIN', 0.1)
         best_patient = None
         best_confidence = 0.0
+        second_best_confidence = 0.0
 
         for patient in Patient.objects.filter(face_images__isnull=False).distinct():
             self._ensure_face_encodings(patient)
             patient_encodings = FaceEncoding.objects.filter(face_image__patient_subject=patient)
+            patient_confidence = 0.0
             for face_encoding in patient_encodings:
                 confidence = self._similarity_score(encoding, face_encoding.encoding)
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_patient = patient
+                patient_confidence = max(patient_confidence, confidence)
+            if patient_confidence > best_confidence:
+                second_best_confidence = best_confidence
+                best_confidence = patient_confidence
+                best_patient = patient
+            elif patient_confidence > second_best_confidence:
+                second_best_confidence = patient_confidence
 
-        matched = best_patient is not None and best_confidence >= threshold
-        if matched and best_patient is not None and best_patient.face_images.exists():
-            patient_image_encoding = FaceEncoding.objects.filter(face_image__patient_subject=best_patient).first()
-            if patient_image_encoding is not None and patient_image_encoding.encoding and len(patient_image_encoding.encoding) > 0:
-                confidence = self._similarity_score(encoding, patient_image_encoding.encoding)
-                matched = confidence >= threshold
-                best_confidence = confidence
+        # Require the winner to clearly beat the runner-up, not just clear
+        # the threshold -- otherwise two similar-looking people can produce
+        # near-tied scores and the system confidently "picks" the wrong one.
+        matched = (
+            best_patient is not None
+            and best_confidence >= threshold
+            and (best_confidence - second_best_confidence) >= match_margin
+        )
         patient_id = best_patient.id if matched and best_patient else None
         device_id = request.data.get('device_id') or request.data.get('deviceId') or 'unknown'
 
@@ -233,12 +245,7 @@ class IdentifyPatientView(views.APIView):
 
     @staticmethod
     def _similarity_score(a, b):
-        if not a or not b:
-            return 0.0
-        if len(a) != len(b):
-            return 0.0
-        diff = sum((x - y) ** 2 for x, y in zip(a, b))
-        return max(0.0, 1.0 - (diff / max(len(a), 1)))
+        return compute_similarity(a, b)
 
 
 class IdentifyKnownPersonView(views.APIView):
@@ -300,13 +307,7 @@ class IdentifyKnownPersonView(views.APIView):
         if not token:
             return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        try:
-            payload = loads(token)
-        except Exception:
-            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        patient_id = payload.get('patient_id') if isinstance(payload, dict) else None
-        patient = Patient.objects.filter(id=patient_id).first() if patient_id else None
+        patient = resolve_patient_from_token(token)
         if patient is None:
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -347,61 +348,49 @@ class IdentifyKnownPersonView(views.APIView):
                 except Exception:
                     return Response({'detail': 'Unable to generate an encoding for the image.'}, status=status.HTTP_400_BAD_REQUEST)
         else:
+            # No degenerate-box fallback here on purpose: generate_encoding()
+            # with a placeholder (0, 0, 1, 1) box still produces a
+            # "valid-looking" encoding from whatever's in frame -- including
+            # a plain wall -- and that encoding can score deceptively high
+            # against real registered faces via cosine similarity. A photo
+            # detect_face() can't find exactly one face in should be
+            # rejected, not silently re-encoded and compared anyway.
             try:
                 face_location = detect_face(image)
                 encoding = generate_encoding(image, face_location)
-            except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError):
-                encoding = None
+            except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError) as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        if encoding is None:
-            try:
-                encoding = generate_encoding(image, (0, 0, 1, 1))
-            except Exception:
-                # Try to use an existing fallback face image encoding for this patient
-                fallback_face = self._get_fallback_image(patient)
-                fallback_encoding = None
-                if fallback_face is not None:
-                    existing = FaceEncoding.objects.filter(face_image=fallback_face).first()
-                    if existing is not None and existing.encoding:
-                        fallback_encoding = existing.encoding
-                    else:
-                        try:
-                            # attempt to build encoding for the fallback face image
-                            face_loc = None
-                            try:
-                                face_loc = detect_face(fallback_face.image)
-                            except Exception:
-                                face_loc = (0, 0, 1, 1)
-                            fallback_encoding = generate_encoding(fallback_face.image, face_loc)
-                            FaceEncoding.objects.create(
-                                subject_type=fallback_face.subject_type,
-                                content_type=fallback_face.content_type,
-                                object_id=fallback_face.object_id,
-                                face_image=fallback_face,
-                                encoding=fallback_encoding,
-                            )
-                        except Exception:
-                            fallback_encoding = None
-                if fallback_encoding is None:
-                    return Response({'detail': 'Unable to generate an encoding for the image.'}, status=status.HTTP_400_BAD_REQUEST)
-                encoding = fallback_encoding
-
-        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.08)
+        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.5)
+        match_margin = getattr(settings, 'RECOGNITION_MATCH_MARGIN', 0.1)
         best_known_person = None
         best_confidence = 0.0
+        second_best_confidence = 0.0
 
         for known_person in KnownPerson.objects.filter(patient=patient):
             self._ensure_face_encodings(known_person)
             patient_encodings = FaceEncoding.objects.filter(face_image__content_type=ContentType.objects.get_for_model(known_person), face_image__object_id=known_person.id)
+            person_confidence = 0.0
             for face_encoding in patient_encodings:
                 confidence = self._similarity_score(encoding, face_encoding.encoding)
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_known_person = known_person
+                person_confidence = max(person_confidence, confidence)
+            if person_confidence > best_confidence:
+                second_best_confidence = best_confidence
+                best_confidence = person_confidence
+                best_known_person = known_person
+            elif person_confidence > second_best_confidence:
+                second_best_confidence = person_confidence
 
-        matched = best_known_person is not None and best_confidence >= threshold
-        if not matched and best_known_person is not None and best_confidence >= max(0.05, threshold * 0.5):
-            matched = True
+        # Require the winner to clearly beat the runner-up, not just clear
+        # the threshold -- otherwise two similar-looking known people can
+        # produce near-tied scores and the system confidently "picks" the
+        # wrong one (this is what happened with Ganesh being reported as
+        # Suju).
+        matched = (
+            best_known_person is not None
+            and best_confidence >= threshold
+            and (best_confidence - second_best_confidence) >= match_margin
+        )
         subject_content_type = ContentType.objects.get_for_model(best_known_person) if best_known_person is not None else None
         RecognitionHistory.objects.create(
             patient=patient,
@@ -530,9 +519,4 @@ class IdentifyKnownPersonView(views.APIView):
 
     @staticmethod
     def _similarity_score(a, b):
-        if not a or not b:
-            return 0.0
-        if len(a) != len(b):
-            return 0.0
-        diff = sum((x - y) ** 2 for x, y in zip(a, b))
-        return max(0.0, 1.0 - (diff / max(len(a), 1)))
+        return compute_similarity(a, b)

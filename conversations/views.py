@@ -1,5 +1,4 @@
 from django.conf import settings
-from django.core.signing import loads
 from django.contrib.contenttypes.models import ContentType
 from rest_framework import status, views
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -7,7 +6,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 
-from patients.models import Patient
+from patients.auth import resolve_patient_from_token
 from known_people.models import KnownPerson
 from .models import ConversationHistory
 from .services import SpeechToTextError, SummarizationError, transcribe_audio, transcribe_audio_high_pass, summarize_transcript
@@ -47,13 +46,8 @@ class ConversationSummarizeView(views.APIView):
         if not token:
             return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        try:
-            payload = loads(token)
-        except Exception:
-            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        patient = Patient.objects.filter(id=payload.get('patient_id')).first()
-        if patient is None or str(payload.get('patient_id')) != str(patient_id):
+        patient = resolve_patient_from_token(token)
+        if patient is None or str(patient.id) != str(patient_id):
             return Response({'detail': 'Token patient_id does not match request patient_id.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         known_person = KnownPerson.objects.filter(id=known_person_id, patient=patient).first()
@@ -144,13 +138,8 @@ class ConversationTranscribeView(views.APIView):
         if not token:
             return Response({'detail': 'A patient session token is required.'}, status=status.HTTP_401_UNAUTHORIZED)
 
-        try:
-            payload = loads(token)
-        except Exception:
-            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        patient = Patient.objects.filter(id=payload.get('patient_id')).first()
-        if patient is None or str(payload.get('patient_id')) != str(patient_id):
+        patient = resolve_patient_from_token(token)
+        if patient is None or str(patient.id) != str(patient_id):
             return Response({'detail': 'Token patient_id does not match request patient_id.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         transcript = ''

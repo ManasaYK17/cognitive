@@ -7,13 +7,60 @@ from django.db import transaction
 from rest_framework import generics, permissions, status, views
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Patient, FaceImage
+from .models import Patient, FaceImage, PatientDevice
 from .serializers import PatientSerializer, FaceImageSerializer
 from .permissions import IsCaregiverOwner
 from conversations.models import ConversationHistory
 from geofencing.models import LocationPing, SafeZone
 from history.models import RecognitionHistory
 from recognition.services import detect_face, generate_encoding
+
+
+class PatientDeviceListCreateView(views.APIView):
+    """Lets a caregiver link a physical device (identified by a stable
+    hardware id, e.g. the specs firmware's WiFi MAC address) to their
+    patient, so hardware that can't do a per-session face-login handshake
+    still knows who it's acting on behalf of. Re-registering an existing
+    device_id re-points it at the (possibly new) patient, which is what
+    makes this survive a data reset -- update_or_create rather than
+    erroring on a duplicate."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        patient = getattr(request.user, 'patient', None)
+        if patient is None:
+            return Response({'detail': 'No patient found for this caregiver.'}, status=status.HTTP_404_NOT_FOUND)
+        devices = PatientDevice.objects.filter(patient=patient).order_by('-created_at')
+        return Response([
+            {'id': d.id, 'device_id': d.device_id, 'label': d.label, 'created_at': d.created_at}
+            for d in devices
+        ])
+
+    def post(self, request, *args, **kwargs):
+        patient = getattr(request.user, 'patient', None)
+        if patient is None:
+            return Response({'detail': 'No patient found for this caregiver.'}, status=status.HTTP_404_NOT_FOUND)
+
+        device_id = (request.data.get('device_id') or '').strip()
+        if not device_id:
+            return Response({'detail': 'device_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device, _ = PatientDevice.objects.update_or_create(
+            device_id=device_id,
+            defaults={'patient': patient, 'label': request.data.get('label', '')},
+        )
+        return Response(
+            {'id': device.id, 'device_id': device.device_id, 'label': device.label, 'patient_id': patient.id},
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, *args, **kwargs):
+        patient = getattr(request.user, 'patient', None)
+        device_id = request.query_params.get('device_id')
+        if patient is None or not device_id:
+            return Response({'detail': 'device_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        PatientDevice.objects.filter(patient=patient, device_id=device_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class CaregiverPatientView(views.APIView):

@@ -8,7 +8,16 @@ from patients.models import Patient, FaceImage
 from accounts.models import Caregiver
 from known_people.models import KnownPerson
 from history.models import RecognitionHistory
-from .services import detect_face, generate_encoding, NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError
+from . import services
+from .services import (
+    detect_face,
+    generate_encoding,
+    NoFaceDetectedError,
+    MultipleFacesDetectedError,
+    LowQualityImageError,
+    _LBP_GRID,
+    _LBP_BINS,
+)
 from .models import FaceEncoding
 from PIL import Image, ImageDraw
 import io
@@ -34,7 +43,10 @@ class RecognitionServiceTests(TestCase):
         face_location = detect_face(image)
         self.assertIsNotNone(face_location)
         encoding = generate_encoding(image, face_location)
-        self.assertEqual(len(encoding), 128)
+        # dlib's real face encoder (128-d) is used when face-recognition is
+        # installed; otherwise this falls back to the LBP grid histogram.
+        expected_length = 128 if services.face_recognition is not None else _LBP_GRID[0] * _LBP_GRID[1] * _LBP_BINS
+        self.assertEqual(len(encoding), expected_length)
 
     def test_no_face_detected_raises_clear_error(self):
         image = self._make_image(with_face=False)

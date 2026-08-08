@@ -14,10 +14,10 @@ namespace {
 constexpr uint32_t kIpPrintIntervalMs = 5000;
 constexpr size_t kMinJpegBytes = 4000;     // suspiciously small -> likely blank frame
 constexpr double kMinByteVariance = 300.0; // suspiciously flat -> likely blank/blurred
-constexpr const char *kIdentifyUrl = "http://10.80.46.169:8000/api/recognition/identify-known-person/";
-constexpr const char *kSummarizeUrl = "http://10.80.46.169:8000/api/conversations/summarize/";
-constexpr const char *kTranscribeUrl = "http://10.80.46.169:8000/api/conversations/transcribe/";
-constexpr const char *kCreateFromEncounterUrl = "http://10.80.46.169:8000/api/known-people/create-from-encounter/";
+constexpr const char *kIdentifyUrl = "http://192.168.29.253:8000/api/recognition/identify-known-person/";
+constexpr const char *kSummarizeUrl = "http://192.168.29.253:8000/api/conversations/summarize/";
+constexpr const char *kTranscribeUrl = "http://192.168.29.253:8000/api/conversations/transcribe/";
+constexpr const char *kCreateFromEncounterUrl = "http://192.168.29.253:8000/api/known-people/create-from-encounter/";
 constexpr const char *kMultipartBoundary = "specsFirmwareBoundary";
 // Onboard PDM mic (Seeed XIAO ESP32S3 Sense), read via the newer ESP_I2S.h
 // driver (arduino-esp32 3.x). Replaces the external INMP441 + legacy I2S.h
@@ -110,6 +110,15 @@ uint8_t *heldIdentifyImageBytes = nullptr;  // JPEG copied out of the mid-sessio
 size_t heldIdentifyImageLength = 0;
 String warmup1ResultText = "not yet run";  // TEMP diagnostic, see /status
 String warmup2ResultText = "not yet run";
+// Sent as the Bearer token on every identify/summarize/transcribe/
+// create-from-encounter request. This is the device's WiFi MAC address
+// (set once WiFi comes up in setup(), never changes across reboots or
+// reflashes) rather than a signed session token baked in at compile time --
+// the server looks up which patient this device belongs to via a
+// PatientDevice row, so nothing here needs updating when patient data on
+// the server gets reset. Register this device once with:
+//   python manage.py register_device <this MAC> <patient_id>
+String deviceAuthToken;
 bool cameraReady = false;
 bool micReady = false;
 bool sdReady = false;
@@ -170,7 +179,13 @@ camera_config_t buildCameraConfig() {
   config.ledc_timer = LEDC_TIMER_0;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA;
+  // SVGA (800x600) rather than VGA (640x480): the actual face region in a
+  // typical selfie-distance frame is a small fraction of the full image, so
+  // going up a step gives real-world face crops meaningfully more pixels to
+  // work with -- this was the limiting factor in observed misidentifications
+  // (a face crop as small as ~99x133px from VGA), not the recognition
+  // algorithm. Safe on PSRAM (8MB on this board).
+  config.frame_size = FRAMESIZE_SVGA;
   config.jpeg_quality = 10;
   config.fb_count = psramFound() ? 2 : 1;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
@@ -268,7 +283,7 @@ bool identifyKnownPerson(camera_fb_t *fb, String &outName, String &outRelationsh
   HTTPClient http;
   http.begin(kIdentifyUrl);
   http.addHeader("Content-Type", String("multipart/form-data; boundary=") + kMultipartBoundary);
-  http.addHeader("Authorization", String("Bearer ") + PATIENT_SESSION_TOKEN);
+  http.addHeader("Authorization", String("Bearer ") + deviceAuthToken);
 
   int httpCode = http.POST(body, totalLen);
   free(body);
@@ -398,7 +413,7 @@ int postConversationAudio(const char *url, const String &filename, long patientI
   http.begin(url);
   http.setTimeout(kConversationUploadTimeoutMs);
   http.addHeader("Content-Type", String("multipart/form-data; boundary=") + kMultipartBoundary);
-  http.addHeader("Authorization", String("Bearer ") + PATIENT_SESSION_TOKEN);
+  http.addHeader("Authorization", String("Bearer ") + deviceAuthToken);
 
   int httpCode = http.sendRequest("POST", &bodyStream, totalLen);
   file.close();
@@ -478,7 +493,7 @@ bool postCreateFromEncounter(const uint8_t *imageBytes, size_t imageLength, cons
   HTTPClient http;
   http.begin(kCreateFromEncounterUrl);
   http.addHeader("Content-Type", String("multipart/form-data; boundary=") + kMultipartBoundary);
-  http.addHeader("Authorization", String("Bearer ") + PATIENT_SESSION_TOKEN);
+  http.addHeader("Authorization", String("Bearer ") + deviceAuthToken);
 
   int httpCode = http.POST(body, totalLen);
   free(body);
@@ -901,6 +916,14 @@ void setup() {
   Serial.println();
   Serial.println("WiFi connected.");
 
+  deviceAuthToken = WiFi.macAddress();
+  Serial.print("Device id (WiFi MAC, used as the auth token): ");
+  Serial.println(deviceAuthToken);
+  Serial.println("If the server doesn't recognize this device yet, register it with:");
+  Serial.print("  python manage.py register_device ");
+  Serial.print(deviceAuthToken);
+  Serial.println(" <patient_id>");
+
   cameraReady = initCamera();
   if (!cameraReady) {
     Serial.println("Camera unavailable; capture loop will stay idle.");
@@ -1007,9 +1030,16 @@ void loop() {
         lastIdentifyMatch = identifyKnownPerson(fb, lastIdentifyName, lastIdentifyRelationship, lastIdentifySummary,
                                                  lastIdentifyKnownPersonId, lastIdentifyPatientId);
         esp_camera_fb_return(fb);
-        Serial.printf("[IDENTIFY] result: match=%s name=%s relationship=%s last_summary=%s\n",
-                      lastIdentifyMatch ? "true" : "false", lastIdentifyName.c_str(),
-                      lastIdentifyRelationship.c_str(), lastIdentifySummary.c_str());
+        // The server still returns its best (non-matching) guess even when
+        // match=false, so printing name/relationship unconditionally here
+        // used to make every rejected/uncertain capture look like a wrong
+        // identification. Only show them on an actual match.
+        if (lastIdentifyMatch) {
+          Serial.printf("[IDENTIFY] result: match=true name=%s relationship=%s last_summary=%s\n",
+                        lastIdentifyName.c_str(), lastIdentifyRelationship.c_str(), lastIdentifySummary.c_str());
+        } else {
+          Serial.println("[IDENTIFY] result: match=false (no known person identified)");
+        }
       } else {
         Serial.println("[IDENTIFY] capture failed (even after deinit/reinit) -- no identify attempt made this session.");
       }
