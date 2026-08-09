@@ -52,6 +52,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- flutter_foreground_task's service, re-declared here (Gradle's
+             manifest merger merges by exact android:name match, and the
+             app manifest's attributes win) so it picks up
+             foregroundServiceType="location", required on API 34+ for a
+             foreground service doing location work. Deliberately no
+             android:stopWithTask; the default (false) is what lets this
+             service, and the process pinning it, survive the user swiping
+             the app away from Recents. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="location"
+            android:exported="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

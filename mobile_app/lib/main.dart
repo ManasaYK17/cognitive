@@ -13,15 +13,21 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService.initialize();
   final authService = AuthService();
+  final locationService = LocationService();
   ApiClient.onUnauthorized = authService.forceLogout;
+  // Ends background location reporting whenever a patient session actually
+  // ends (exit patient mode, forced logout) -- without this, reporting kept
+  // running (foreground service included) until the process happened to die.
+  authService.onPatientSessionCleared = locationService.stopReporting;
   await authService.loadPersistedToken();
-  runApp(CognitiveAssistApp(authService: authService));
+  runApp(CognitiveAssistApp(authService: authService, locationService: locationService));
 }
 
 class CognitiveAssistApp extends StatefulWidget {
   final AuthService authService;
+  final LocationService locationService;
 
-  const CognitiveAssistApp({required this.authService, super.key});
+  const CognitiveAssistApp({required this.authService, required this.locationService, super.key});
 
   @override
   State<CognitiveAssistApp> createState() => _CognitiveAssistAppState();
@@ -78,7 +84,7 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
       providers: [
         ChangeNotifierProvider.value(value: widget.authService),
         ChangeNotifierProvider(create: (_) => RecognitionService()),
-        ChangeNotifierProvider(create: (_) => LocationService()),
+        ChangeNotifierProvider.value(value: widget.locationService),
         ChangeNotifierProvider(create: (_) => AudioService()),
       ],
       child: MaterialApp(

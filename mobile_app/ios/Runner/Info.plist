@@ -28,6 +28,14 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>This app uses the camera to scan faces automatically.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Cognitive Assist uses your location to let your caregiver see where you are.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Cognitive Assist shares your location with your caregiver, including when the app is in the background, so they can check on you and be alerted if you leave a safe area.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

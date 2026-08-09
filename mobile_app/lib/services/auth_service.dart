@@ -33,6 +33,12 @@ class AuthService extends ChangeNotifier {
   bool sessionExpired = false;
   bool _forcingLogout = false;
 
+  // Set once at startup (see main.dart) to LocationService.stopReporting.
+  // Fired whenever a patient session actually ends, so background location
+  // reporting doesn't keep running (and draining battery) after the
+  // caregiver takes the phone back.
+  void Function()? onPatientSessionCleared;
+
   final ApiClient _client = ApiClient();
 
   AuthService() {
@@ -64,6 +70,7 @@ class AuthService extends ChangeNotifier {
   void clearPatientSessionToken() {
     _patientSessionToken = null;
     notifyListeners();
+    onPatientSessionCleared?.call();
   }
 
   // Restores a caregiver session saved by a previous run -- without this,
@@ -222,6 +229,7 @@ class AuthService extends ChangeNotifier {
     _patientSessionToken = null;
     await _persistTokens(access: null, refresh: null);
     notifyListeners();
+    onPatientSessionCleared?.call();
   }
 
   // Called when the backend rejects a request as unauthorized -- expired or
