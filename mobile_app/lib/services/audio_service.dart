@@ -8,6 +8,12 @@ import '../services/api_client.dart';
 import 'audio_path.dart';
 
 class AudioService extends ChangeNotifier {
+  // Transcription + LLM summarization on the backend routinely takes longer
+  // than ApiClient's default 10s (fine for quick JSON/image calls, too
+  // short here) -- give this one room without leaving the request unbounded.
+  static const _uploadTimeout = Duration(seconds: 60);
+
+  final ApiClient _api = ApiClient();
   final AudioRecorder _recorder = AudioRecorder();
   bool _recording = false;
   String? lastSummaryMessage;
@@ -63,18 +69,25 @@ class AudioService extends ChangeNotifier {
       return false;
     }
 
-    final request = http.MultipartRequest('POST', Uri.parse('${ApiClient.baseUrl}/conversations/summarize/'));
-    request.headers['Authorization'] = 'Bearer $sessionToken';
-    request.fields['known_person_id'] = knownPersonId.toString();
-    request.fields['patient_id'] = patientId.toString();
-    request.files.add(await http.MultipartFile.fromPath('audio', path));
-
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
-    if (response.statusCode == 201 || response.statusCode == 200) {
-      lastSummaryMessage = 'Conversation saved successfully.';
-      notifyListeners();
-      return true;
+    try {
+      final response = await _api.sendMultipart(
+        'POST',
+        '/conversations/summarize/',
+        token: sessionToken,
+        fields: {
+          'known_person_id': knownPersonId.toString(),
+          'patient_id': patientId.toString(),
+        },
+        files: [await http.MultipartFile.fromPath('audio', path)],
+        timeout: _uploadTimeout,
+      );
+      if (response.statusCode == 201 || response.statusCode == 200 || response.statusCode == 207) {
+        lastSummaryMessage = 'Conversation saved successfully.';
+        notifyListeners();
+        return true;
+      }
+    } catch (error) {
+      debugPrint('AudioService.stopRecordingAndSend error: $error');
     }
 
     lastSummaryMessage = 'Failed to save conversation.';

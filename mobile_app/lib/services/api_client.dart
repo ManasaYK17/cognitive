@@ -156,6 +156,7 @@ class ApiClient {
     String? token,
     Map<String, String>? fields,
     List<http.MultipartFile> files = const [],
+    Duration? timeout,
   }) async {
     final response = await _sendWithFallback(
       (String baseUri) async {
@@ -170,7 +171,7 @@ class ApiClient {
         for (final file in files) {
           request.files.add(file);
         }
-        final streamed = await request.send().timeout(timeoutDuration);
+        final streamed = await request.send().timeout(timeout ?? timeoutDuration);
         return http.Response.fromStream(streamed);
       },
       path: path,
