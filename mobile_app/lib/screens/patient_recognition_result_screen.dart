@@ -14,6 +14,7 @@ class PatientRecognitionResultScreen extends StatefulWidget {
   final String? knownPersonRelationship;
   final String sessionToken;
   final String? initialLastSummary;
+  final bool recordFromPhone;
 
   const PatientRecognitionResultScreen({
     required this.patientId,
@@ -22,6 +23,7 @@ class PatientRecognitionResultScreen extends StatefulWidget {
     this.knownPersonRelationship,
     required this.sessionToken,
     this.initialLastSummary,
+    this.recordFromPhone = true,
     super.key,
   });
 
@@ -61,8 +63,17 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
       if (!mounted) return;
       await _speakSummary();
       if (!mounted) return;
-      if (_readyToStart) {
+      if (_readyToStart && widget.recordFromPhone) {
         await _startRecording(autoStarted: true);
+      } else if (_readyToStart) {
+        // Detection came from the specs hardware, which is already
+        // recording the conversation itself -- the phone should only
+        // surface the last summary here, not start a second recording.
+        setState(() {
+          _loading = false;
+          _readyToStart = false;
+          _statusMessage = 'Your glasses are capturing this conversation.';
+        });
       }
     } catch (error) {
       if (!mounted) return;
@@ -262,7 +273,10 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
                         Text('Relationship: ${widget.knownPersonRelationship}', style: Theme.of(context).textTheme.bodyMedium),
                       ],
                       const SizedBox(height: 8),
-                      Text('Conversation capture is active.', style: Theme.of(context).textTheme.bodyMedium),
+                      Text(
+                        widget.recordFromPhone ? 'Conversation capture is active.' : 'Your glasses are recording this conversation.',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
                       const SizedBox(height: 16),
                       if (_lastSummary != null) ...[
                         const Text('Last conversation', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -315,12 +329,18 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
                   label: const Text('Stop recording'),
                   style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56), backgroundColor: Colors.red),
                 )
-              else
+              else if (widget.recordFromPhone)
                 ElevatedButton.icon(
                   onPressed: _readyToStart ? () => _startRecording(autoStarted: false) : null,
                   icon: const Icon(Icons.mic),
                   label: const Text('Start Conversation'),
                   style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                )
+              else
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
+                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                  child: const Text('Back to Home'),
                 ),
             ],
           ),

@@ -391,13 +391,14 @@ class IdentifyKnownPersonView(views.APIView):
             and best_confidence >= threshold
             and (best_confidence - second_best_confidence) >= match_margin
         )
+        source_value = request.data.get('source', 'phone_camera')
         subject_content_type = ContentType.objects.get_for_model(best_known_person) if best_known_person is not None else None
         RecognitionHistory.objects.create(
             patient=patient,
             subject_type='known_person',
             content_type=subject_content_type,
             object_id=best_known_person.id if best_known_person is not None else None,
-            source=request.data.get('source', 'phone_camera'),
+            source=source_value,
             confidence_score=best_confidence,
             outcome='matched' if matched else 'not_matched',
         )
@@ -410,7 +411,12 @@ class IdentifyKnownPersonView(views.APIView):
             if latest_conversation is not None:
                 last_summary = latest_conversation.summary
 
-        if matched and best_known_person is not None:
+        # Only push when the match came from the specs hardware, not the
+        # patient's own phone -- a phone-originated scan already has the
+        # result in this HTTP response and navigates directly, so pushing
+        # here too would open a second result screen and start a redundant
+        # phone recording on top of the one already in progress.
+        if matched and best_known_person is not None and source_value != 'phone_auto_capture':
             device_token = getattr(patient, 'fcm_device_token', None)
             if device_token:
                 cooldown_cutoff = timezone.now() - timedelta(minutes=3)

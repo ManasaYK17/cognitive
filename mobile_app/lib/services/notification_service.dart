@@ -118,6 +118,11 @@ class NotificationService {
           knownPersonRelationship: relationship,
           sessionToken: sessionToken,
           initialLastSummary: lastSummary,
+          // This screen only opens via the known-person FCM push, which the
+          // backend now only sends for specs-hardware detections (see
+          // IdentifyKnownPersonView.post) -- the specs are already
+          // recording the conversation, so the phone must not record too.
+          recordFromPhone: false,
         ),
       ),
     );
