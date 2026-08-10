@@ -76,12 +76,26 @@ class PatientTests(APITestCase):
         )
         RecognitionHistory.objects.create(
             patient=patient,
+            subject_type='known_person',
+            content_type=None,
+            object_id=None,
+            confidence_score=0.2,
+            source='phone_camera',
+            outcome='not_matched',
+            timestamp=timezone.now(),
+        )
+        # A patient face-login attempt (identify-patient), not a known-person
+        # detection -- must NOT count toward known/unknown detection stats,
+        # otherwise every time the patient scans in to enter patient mode it
+        # would inflate "known people recognized" on the caregiver dashboard.
+        RecognitionHistory.objects.create(
+            patient=patient,
             subject_type='patient',
             content_type=None,
             object_id=patient.id,
             confidence_score=0.61,
             source='phone_camera',
-            outcome='not_matched',
+            outcome='matched',
             timestamp=timezone.now(),
         )
         ConversationHistory.objects.create(patient=patient, known_person=known_person, summary='Saved summary', transcript='hi')

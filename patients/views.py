@@ -110,7 +110,16 @@ class PatientDashboardSummaryView(views.APIView):
         start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
         start_of_week = start_of_today - timedelta(days=start_of_today.weekday())
 
-        recognition_qs = RecognitionHistory.objects.filter(patient=patient)
+        # Only count actual known-person detections (relatives/caregivers
+        # recognized around the patient) here -- RecognitionHistory also
+        # holds the patient's own face-login attempts (subject_type=
+        # 'patient', from IdentifyPatientView) and a bookkeeping row per
+        # push actually sent (outcome='known_person_push', duplicating the
+        # 'matched' row for the same capture); including either inflated
+        # "known people recognized" counts with events that aren't that.
+        recognition_qs = RecognitionHistory.objects.filter(
+            patient=patient, subject_type='known_person'
+        ).exclude(outcome='known_person_push')
         today_recognition = recognition_qs.filter(timestamp__gte=start_of_today)
         week_recognition = recognition_qs.filter(timestamp__gte=start_of_week)
 
@@ -153,7 +162,7 @@ class PatientDashboardSummaryView(views.APIView):
             safe_zone_payload['inside'] = last_ping.distance_from_center_meters <= safe_zone.radius_meters
 
         recent_activity = []
-        for item in RecognitionHistory.objects.filter(patient=patient).order_by('-timestamp')[:5]:
+        for item in recognition_qs.order_by('-timestamp')[:5]:
             recent_activity.append({
                 'id': item.id,
                 'event_type': 'recognition',
