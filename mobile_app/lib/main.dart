@@ -73,6 +73,7 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
       // while backgrounded -- catch up immediately on resume rather than
       // waiting for its next scheduled tick.
       widget.authService.refreshAccessToken();
+      widget.authService.ensurePatientDeviceTokenRegistered();
       NotificationService.consumePendingKnownPersonPush();
       NotificationService.consumePendingGeofenceAlert();
     }

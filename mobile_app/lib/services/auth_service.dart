@@ -258,6 +258,16 @@ class AuthService extends ChangeNotifier {
         body: {'device_token': firebaseToken}, token: _accessToken);
   }
 
+  // Re-attempts device-token registration for the active patient session.
+  // Registration otherwise only happens once, at setPatientSessionToken() --
+  // if that single attempt fails (FCM not ready yet right after login, a
+  // transient network blip) it's swallowed silently and the backend is left
+  // pushing known-person notifications to a token it never received, with no
+  // symptom visible on the phone. Call on every app resume so a later
+  // attempt has a chance to succeed instead of the rest of the session
+  // silently never getting hardware-detection pushes.
+  Future<void> ensurePatientDeviceTokenRegistered() => _registerPatientDeviceToken();
+
   Future<void> _registerPatientDeviceToken({String? firebaseToken}) async {
     if (kIsWeb) return;
     final token = firebaseToken ?? await FirebaseMessaging.instance.getToken();
