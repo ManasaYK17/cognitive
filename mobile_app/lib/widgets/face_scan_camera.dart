@@ -149,10 +149,11 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
         _finishCapture(imageFile);
       }
 
-      if (!forceCapture && mounted && !_didCapture) {
-        debugPrint('[face_scan] using the captured still image as a fallback even without ML Kit confirmation');
-        _finishCapture(_lastCapturedImage!);
-      }
+      // Do not accept a captured still image unless ML Kit detected a face
+      // or a forced fallback capture is requested. Accepting a non-detected
+      // still image here led to placeholder/test-pattern captures being
+      // used for recognition (no actual face). Let the timeout and
+      // scheduled forced fallback handle degenerate cases instead.
     } catch (error, stackTrace) {
       debugPrint('[face_scan] still-image detection exception: $error');
       debugPrint(stackTrace.toString());

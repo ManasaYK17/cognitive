@@ -12,6 +12,12 @@ from known_people.models import KnownPerson
 from conversations.models import ConversationHistory
 
 
+class ConversationAudioNormalizationTests(APITestCase):
+    def test_normalize_audio_bytes_returns_none_for_empty_input(self):
+        from conversations.services import _normalize_audio_bytes
+        self.assertIsNone(_normalize_audio_bytes(b''))
+
+
 class ConversationSummarizeTests(APITestCase):
     def setUp(self):
         self.caregiver = Caregiver.objects.create_user(email='convcaregiver@example.com', first_name='Conv', password='StrongPass123')

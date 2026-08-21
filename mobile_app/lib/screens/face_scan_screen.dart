@@ -33,36 +33,55 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
     final authService = Provider.of<AuthService>(context, listen: false);
 
-    final captureResult = await Navigator.of(context).push<FaceScanCaptureResult>(
-      MaterialPageRoute(builder: (_) => const FaceScanCamera(timeoutSeconds: 18)),
-    );
+    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
 
-    if (!mounted) return;
-
-    if (captureResult == null || captureResult.cancelled || captureResult.image == null) {
-      setState(() {
-        _scanning = false;
-        _statusMessage = captureResult?.message ?? 'No face detected';
-      });
-      await Future.delayed(const Duration(milliseconds: 700));
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => authService.accessToken != null ? const CaregiverDashboardScreen() : const CaregiverLoginScreen(),
-        ),
+    // Attempt up to 3 captures (first with longer timeout, retries shorter)
+    Map<String, dynamic>? result;
+    bool matched = false;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      final timeout = attempt == 0 ? 18 : 8;
+      final captureResult = await Navigator.of(context).push<FaceScanCaptureResult>(
+        MaterialPageRoute(builder: (_) => FaceScanCamera(timeoutSeconds: timeout)),
       );
-      return;
+
+      if (!mounted) return;
+
+      if (captureResult == null || captureResult.cancelled || captureResult.image == null) {
+        setState(() {
+          _scanning = false;
+          _statusMessage = captureResult?.message ?? 'No face detected';
+        });
+        await Future.delayed(const Duration(milliseconds: 700));
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => authService.accessToken != null ? const CaregiverDashboardScreen() : const CaregiverLoginScreen(),
+          ),
+        );
+        return;
+      }
+
+      final bytes = await captureResult.image!.readAsBytes();
+      debugPrint('[face_scan_screen] attempt=$attempt captured image bytes=${bytes.length} name=${captureResult.image!.name}');
+      result = await recognitionService.attemptPatientRecognitionFromBytes(bytes, captureResult.image!.name, 'phone_auto_capture');
+      debugPrint('[face_scan_screen] recognition result (attempt $attempt): $result');
+
+      if (!mounted) return;
+
+      if (result != null && result['match'] == true && recognitionService.sessionToken != null) {
+        matched = true;
+        break;
+      }
+
+      if (attempt < 2) {
+        setState(() {
+          _statusMessage = 'No match — retrying scan...';
+        });
+        await Future.delayed(const Duration(milliseconds: 400));
+      }
     }
 
-    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
-    final bytes = await captureResult.image!.readAsBytes();
-    debugPrint('[face_scan_screen] captured image bytes=${bytes.length} name=${captureResult.image!.name}');
-    final result = await recognitionService.attemptPatientRecognitionFromBytes(bytes, captureResult.image!.name, 'phone_auto_capture');
-    debugPrint('[face_scan_screen] recognition result: $result');
-
-    if (!mounted) return;
-
-    if (result != null && result['match'] == true && recognitionService.sessionToken != null) {
+    if (matched && recognitionService.sessionToken != null) {
       authService.setPatientSessionToken(recognitionService.sessionToken!);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const PatientModeScreen()),

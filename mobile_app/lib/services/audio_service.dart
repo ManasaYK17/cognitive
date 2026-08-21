@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -86,8 +87,29 @@ class AudioService extends ChangeNotifier {
         notifyListeners();
         return true;
       }
+
+      var message = 'Failed to save conversation.';
+      if (kDebugMode) {
+        try {
+          debugPrint('AudioService.stopRecordingAndSend response: ${response.statusCode}');
+          debugPrint('AudioService.stopRecordingAndSend body: ${response.body}');
+        } catch (_) {}
+      }
+      try {
+        final bodyJson = json.decode(response.body);
+        if (bodyJson is Map<String, dynamic>) {
+          message = bodyJson['detail'] as String? ?? bodyJson['error_message'] as String? ?? message;
+        }
+      } catch (_) {
+        // ignore JSON parsing errors
+      }
+      lastSummaryMessage = '$message (${response.statusCode})';
+      notifyListeners();
+      return false;
     } catch (error) {
       debugPrint('AudioService.stopRecordingAndSend error: $error');
+      lastSummaryMessage = 'Failed to save conversation: $error';
+      notifyListeners();
     }
 
     lastSummaryMessage = 'Failed to save conversation.';

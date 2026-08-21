@@ -5,7 +5,6 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/audio_service.dart';
-import '../theme/design_tokens.dart';
 
 class PatientRecognitionResultScreen extends StatefulWidget {
   final int patientId;
@@ -190,6 +189,11 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
     setState(() {
       _sending = false;
       _statusMessage = success ? 'Conversation saved successfully. Returning home...' : 'Failed to save conversation. You can try again from home.';
+      if (!success) {
+        // Surface the detailed message from AudioService (parsed server
+        // response or upload error) to the UI so users see why save failed.
+        _errorMessage = audioService.lastSummaryMessage ?? 'Failed to save conversation.';
+      }
     });
 
     if (success) {
@@ -260,30 +264,36 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Card(
-                color: DesignTokens.lightSurface,
+                color: const Color(0xFF212121),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                 child: Padding(
                   padding: const EdgeInsets.all(20.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(widget.knownPersonName, style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        widget.knownPersonName,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(color: Colors.white),
+                      ),
                       if (widget.knownPersonRelationship?.trim().isNotEmpty == true) ...[
                         const SizedBox(height: 8),
-                        Text('Relationship: ${widget.knownPersonRelationship}', style: Theme.of(context).textTheme.bodyMedium),
+                        Text(
+                          'Relationship: ${widget.knownPersonRelationship}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                        ),
                       ],
                       const SizedBox(height: 8),
                       Text(
                         widget.recordFromPhone ? 'Conversation capture is active.' : 'Your glasses are recording this conversation.',
-                        style: Theme.of(context).textTheme.bodyMedium,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                       ),
                       const SizedBox(height: 16),
                       if (_lastSummary != null) ...[
-                        const Text('Last conversation', style: TextStyle(fontWeight: FontWeight.w600)),
+                        Text('Last conversation', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: Colors.white)),
                         const SizedBox(height: 8),
-                        Text(_lastSummary!, style: const TextStyle(fontSize: 15, color: Colors.black87)),
+                        Text(_lastSummary!, style: const TextStyle(fontSize: 15, color: Colors.white70)),
                       ] else ...[
-                        const Text('No previous conversation found.', style: TextStyle(fontSize: 15, color: Colors.black87)),
+                        const Text('No previous conversation found.', style: TextStyle(fontSize: 15, color: Colors.white70)),
                       ],
                     ],
                   ),

@@ -76,7 +76,7 @@ class RecognitionEndpointTests(APITestCase):
         self.known_person = KnownPerson.objects.create(patient=self.patient, name='Mina', relationship='Daughter')
         self.device_id = 'device-123'
         self.patient_image = self._make_image()
-        self.known_person_image = self._make_image()
+        self.known_person_image = self._make_image(color=(0, 255, 0))
         self.patient_face_image = FaceImage.objects.create(subject_type='patient', patient_subject=self.patient, image=self.patient_image)
         self.known_person_face_image = FaceImage.objects.create(
             subject_type='known_person',
@@ -113,6 +113,28 @@ class RecognitionEndpointTests(APITestCase):
         self.assertEqual(response.data['patient_id'], self.patient.id)
         self.assertIn('patient_session_token', response.data)
         self.assertTrue(RecognitionHistory.objects.filter(patient=self.patient, outcome='matched').exists())
+
+    def test_identify_patient_does_not_match_known_person_image(self):
+        response = self.client.post(
+            reverse('identify-patient'),
+            {
+                'device_id': self.device_id,
+                'source': 'phone_auto_capture',
+                'image': self._make_image(color=(0, 255, 0)),
+            },
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertIsNone(response.data['patient_id'])
+        self.assertIsNone(response.data['patient_session_token'])
+        self.assertFalse(
+            RecognitionHistory.objects.filter(
+                patient=self.patient,
+                subject_type='patient',
+                outcome='matched',
+            ).exists(),
+        )
 
     def test_issue_patient_session_token_returns_signed_token(self):
         response = self.client.post(

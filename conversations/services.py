@@ -1,5 +1,9 @@
 import io
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 import wave
 
 import numpy as np
@@ -49,6 +53,57 @@ def _recognize_chunk(recognizer, audio_data):
         return None
 
 
+def _normalize_audio_bytes(raw_bytes, source_name='audio'):
+    """Convert common mobile audio formats (notably .m4a) into PCM WAV bytes.
+
+    This keeps the rest of the transcription pipeline unchanged while allowing
+    the app's recorder output to be processed by SpeechRecognition.
+    """
+    if not raw_bytes:
+        return None
+
+    # Fast path: already a WAV/PCM payload.
+    if source_name.lower().endswith('.wav') or source_name.lower().endswith('.wave'):
+        try:
+            with wave.open(io.BytesIO(raw_bytes), 'rb') as wav:
+                wav.getnframes()
+            return raw_bytes
+        except Exception:
+            pass
+
+    ffmpeg_path = shutil.which('ffmpeg')
+    if ffmpeg_path is None:
+        winget_root = os.path.expandvars(r'%LOCALAPPDATA%\Microsoft\WinGet\Packages')
+        for root, _, files in os.walk(winget_root):
+            if 'ffmpeg.exe' in files:
+                ffmpeg_path = os.path.join(root, 'ffmpeg.exe')
+                break
+    if ffmpeg_path is None:
+        return None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, source_name or 'audio_input')
+        output_path = os.path.join(tmpdir, 'normalized.wav')
+        with open(input_path, 'wb') as handle:
+            handle.write(raw_bytes)
+
+        try:
+            subprocess.run(
+                [ffmpeg_path, '-y', '-i', input_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', output_path],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+        try:
+            with open(output_path, 'rb') as handle:
+                return handle.read()
+        except Exception:
+            return None
+
+
 def transcribe_audio(audio_file):
     if sr is None:
         raise SpeechToTextError('SpeechRecognition library is not installed.')
@@ -58,9 +113,13 @@ def transcribe_audio(audio_file):
     if raw_bytes is None:
         raise SpeechToTextError('Unable to read audio data.')
 
+    normalized_bytes = _normalize_audio_bytes(raw_bytes, getattr(audio_file, 'name', 'audio'))
+    if normalized_bytes is None:
+        raise SpeechToTextError('Unable to process audio file: Audio file could not be read as PCM WAV, AIFF/AIFF-C, or Native FLAC; check if file is corrupted or in another format')
+
     try:
         chunks = []
-        with sr.AudioFile(io.BytesIO(raw_bytes)) as source:
+        with sr.AudioFile(io.BytesIO(normalized_bytes)) as source:
             while True:
                 audio_data = recognizer.record(source, duration=_TRANSCRIBE_CHUNK_SECONDS)
                 if len(audio_data.frame_data) == 0:
