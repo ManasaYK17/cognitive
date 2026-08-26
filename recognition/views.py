@@ -29,6 +29,7 @@ from .services import (
     _load_pil_image,
     compute_similarity,
     detect_face,
+    encoding_matches_current_backend,
     generate_encoding,
 )
 
@@ -107,7 +108,8 @@ class IdentifyPatientView(views.APIView):
             face_images = FaceImage.objects.filter(content_type=content_type, object_id=subject.id)
 
         for face_image in face_images:
-            if FaceEncoding.objects.filter(face_image=face_image).exists():
+            existing_encoding = FaceEncoding.objects.filter(face_image=face_image).first()
+            if existing_encoding and encoding_matches_current_backend(existing_encoding.encoding):
                 continue
             try:
                 face_location = detect_face(face_image.image)
@@ -117,13 +119,17 @@ class IdentifyPatientView(views.APIView):
                     encoding = generate_encoding(face_image.image, (0, 0, 1, 1))
                 except Exception:
                     continue
-            FaceEncoding.objects.create(
-                subject_type=face_image.subject_type,
-                content_type=face_image.content_type,
-                object_id=face_image.object_id,
-                face_image=face_image,
-                encoding=encoding,
-            )
+            if existing_encoding:
+                existing_encoding.encoding = encoding
+                existing_encoding.save(update_fields=['encoding'])
+            else:
+                FaceEncoding.objects.create(
+                    subject_type=face_image.subject_type,
+                    content_type=face_image.content_type,
+                    object_id=face_image.object_id,
+                    face_image=face_image,
+                    encoding=encoding,
+                )
 
     def _find_best_known_person_confidence(self, encoding, patient=None):
         best_confidence = 0.0
@@ -157,15 +163,7 @@ class IdentifyPatientView(views.APIView):
 
         threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.5)
         match_margin = getattr(settings, 'RECOGNITION_MATCH_MARGIN', 0.1)
-        # Allow more permissive matching for trusted phone auto-captures
-        # since device captures can be darker/noisier than stored refs.
         source = request.data.get('source', '')
-        if source == 'phone_auto_capture':
-            # Make matching permissive for phone auto-captures: lower the
-            # required confidence and disable the runner-up margin check so
-            # noisy device captures can still resolve to the correct patient.
-            threshold = getattr(settings, 'RECOGNITION_PHONE_AUTO_THRESHOLD', 0.40)
-            match_margin = 0.0
         best_patient = None
         best_confidence = 0.0
         second_best_confidence = 0.0
@@ -205,11 +203,9 @@ class IdentifyPatientView(views.APIView):
         # Also reject a patient match when a same-patient known person is
         # itself a strong match and nearly as confident, which is more likely
         # a known-person scan.
-        # During phone auto-login, the patient must beat any known-person
-        # candidate. This preserves patient recognition when reference photos
-        # are visually similar, while rejecting a known-person capture whose
-        # known-person score is equal to or higher than the patient score.
-        known_person_exclusion_threshold = threshold if source == 'phone_auto_capture' else float('inf')
+        # A known-person face must not be accepted as the patient, regardless
+        # of whether the request came from the automatic phone scan.
+        known_person_exclusion_threshold = threshold
         known_person_is_too_close = (
             best_known_person_confidence >= known_person_exclusion_threshold
             and best_known_person_confidence >= best_confidence - match_margin
@@ -320,20 +316,25 @@ class IdentifyKnownPersonView(views.APIView):
             face_images = FaceImage.objects.filter(content_type=content_type, object_id=subject.id)
 
         for face_image in face_images:
-            if FaceEncoding.objects.filter(face_image=face_image).exists():
+            existing_encoding = FaceEncoding.objects.filter(face_image=face_image).first()
+            if existing_encoding and encoding_matches_current_backend(existing_encoding.encoding):
                 continue
             try:
                 face_location = detect_face(face_image.image)
                 encoding = generate_encoding(face_image.image, face_location)
             except Exception:
                 continue
-            FaceEncoding.objects.create(
-                subject_type=face_image.subject_type,
-                content_type=face_image.content_type,
-                object_id=face_image.object_id,
-                face_image=face_image,
-                encoding=encoding,
-            )
+            if existing_encoding:
+                existing_encoding.encoding = encoding
+                existing_encoding.save(update_fields=['encoding'])
+            else:
+                FaceEncoding.objects.create(
+                    subject_type=face_image.subject_type,
+                    content_type=face_image.content_type,
+                    object_id=face_image.object_id,
+                    face_image=face_image,
+                    encoding=encoding,
+                )
 
     @staticmethod
     def _get_known_person_fallback_image(patient):
@@ -376,6 +377,7 @@ class IdentifyKnownPersonView(views.APIView):
         patient = resolve_patient_from_token(token)
         if patient is None:
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
+        source = request.data.get('source', '')
 
         # If the live image appears blank, decide whether to reject or to use a stored fallback face.
         from .services import _image_variance
@@ -390,6 +392,8 @@ class IdentifyKnownPersonView(views.APIView):
 
         permissive_fallback = False
         if self._is_blank_image(image):
+            if source == 'phone_auto_capture':
+                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
             fallback_face = self._get_fallback_image(patient)
             if fallback_face is None:
                 return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -426,6 +430,8 @@ class IdentifyKnownPersonView(views.APIView):
                 face_location = detect_face(image)
                 encoding = generate_encoding(image, face_location)
             except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError):
+                if source == 'phone_auto_capture':
+                    return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
                 # Try falling back to a known-person reference for this patient
                 fallback_face = self._get_known_person_fallback_image(patient)
                 if fallback_face is None:
@@ -455,10 +461,14 @@ class IdentifyKnownPersonView(views.APIView):
         threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.5)
         match_margin = getattr(settings, 'RECOGNITION_MATCH_MARGIN', 0.1)
         best_known_person = None
+        second_best_known_person = None
         best_confidence = 0.0
         second_best_confidence = 0.0
 
         for known_person in KnownPerson.objects.filter(patient=patient):
+            normalized_name = (known_person.name or '').strip().lower()
+            if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                continue
             self._ensure_face_encodings(known_person)
             patient_encodings = FaceEncoding.objects.filter(face_image__content_type=ContentType.objects.get_for_model(known_person), face_image__object_id=known_person.id)
             person_confidence = 0.0
@@ -466,10 +476,12 @@ class IdentifyKnownPersonView(views.APIView):
                 confidence = self._similarity_score(encoding, face_encoding.encoding)
                 person_confidence = max(person_confidence, confidence)
             if person_confidence > best_confidence:
+                second_best_known_person = best_known_person
                 second_best_confidence = best_confidence
                 best_confidence = person_confidence
                 best_known_person = known_person
             elif person_confidence > second_best_confidence:
+                second_best_known_person = known_person
                 second_best_confidence = person_confidence
 
         # If no confident match was found, but the live frame's raw bytes
@@ -482,6 +494,9 @@ class IdentifyKnownPersonView(views.APIView):
                 live_bytes = _read_bytes_from_file(image)
                 if live_bytes:
                     for known_person in KnownPerson.objects.filter(patient=patient):
+                        normalized_name = (known_person.name or '').strip().lower()
+                        if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                            continue
                         content_type = ContentType.objects.get_for_model(known_person)
                         for face_image in FaceImage.objects.filter(content_type=content_type, object_id=known_person.id):
                             stored = _read_bytes_from_file(face_image.image)
@@ -510,10 +525,26 @@ class IdentifyKnownPersonView(views.APIView):
             permissive = locals().get('permissive_fallback', False)
         except Exception:
             permissive = False
-
+        hardware_source = request.data.get('source') == 'specs_hardware'
+        phone_source = request.data.get('source') == 'phone_auto_capture'
+        same_named_person = False
+        if best_known_person is not None and second_best_known_person is not None:
+            best_name = (best_known_person.name or '').strip().lower().split()
+            second_name = (second_best_known_person.name or '').strip().lower().split()
+            same_named_person = bool(best_name and second_name and best_name[0] == second_name[0])
         if permissive:
             eff_threshold = fallback_confidence_threshold
             eff_margin = max(match_margin / 2.0, 0.01)
+        elif hardware_source:
+            eff_threshold = max(getattr(settings, 'RECOGNITION_HARDWARE_THRESHOLD', 0.6), 0.6)
+            eff_margin = min(match_margin, getattr(settings, 'RECOGNITION_HARDWARE_MATCH_MARGIN', 0.05))
+        elif phone_source:
+            # The phone currently uses the lightweight LBP fallback when the
+            # production face-recognition backends are unavailable. Its raw
+            # cosine scores are not identity-safe at the normal threshold, so
+            # automatic scans must use a stricter fail-closed calibration.
+            eff_threshold = getattr(settings, 'RECOGNITION_PHONE_AUTO_THRESHOLD', 0.9)
+            eff_margin = getattr(settings, 'RECOGNITION_PHONE_AUTO_MATCH_MARGIN', 0.15)
         else:
             eff_threshold = threshold
             eff_margin = match_margin
@@ -523,19 +554,26 @@ class IdentifyKnownPersonView(views.APIView):
         matched = (
             best_known_person is not None
             and best_confidence >= eff_threshold
-            and (best_confidence - second_best_confidence) >= eff_margin
+            and ((best_confidence - second_best_confidence) >= eff_margin or ((hardware_source or phone_source) and same_named_person))
         )
+        if matched and best_known_person is not None:
+            normalized_name = (best_known_person.name or '').strip().lower()
+            if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                matched = False
+                best_known_person = None
+
         source_value = request.data.get('source', 'phone_camera')
         subject_content_type = ContentType.objects.get_for_model(best_known_person) if best_known_person is not None else None
-        RecognitionHistory.objects.create(
-            patient=patient,
-            subject_type='known_person',
-            content_type=subject_content_type,
-            object_id=best_known_person.id if best_known_person is not None else None,
-            source=source_value,
-            confidence_score=best_confidence,
-            outcome='matched' if matched else 'not_matched',
-        )
+        if matched and best_known_person is not None:
+            RecognitionHistory.objects.create(
+                patient=patient,
+                subject_type='known_person',
+                content_type=subject_content_type,
+                object_id=best_known_person.id,
+                source=source_value,
+                confidence_score=best_confidence,
+                outcome='matched',
+            )
 
         last_summary = None
         if matched and best_known_person is not None:
@@ -562,15 +600,15 @@ class IdentifyKnownPersonView(views.APIView):
                     timestamp__gte=cooldown_cutoff,
                 ).exists()
                 if not recent_push:
-                    # Data-only message (no notification block) so the app can
-                    # act on it directly and open the result screen without
-                    # requiring the user to tap a notification.
                     push_response = send_fcm_push(device_token, data={
+                        'match': 'true',
+                        'patient_id': str(patient.id),
                         'known_person_id': str(best_known_person.id),
                         'name': best_known_person.name or '',
                         'relationship': best_known_person.relationship or '',
                         'last_summary': last_summary or '',
-                    })
+                    }, title=f'Recognized {best_known_person.name}',
+                    body='Opening the conversation result.')
                     if push_response is not None:
                         RecognitionHistory.objects.create(
                             patient=patient,
@@ -585,9 +623,9 @@ class IdentifyKnownPersonView(views.APIView):
         return Response({
             'match': matched,
             'confidence': round(best_confidence, 4),
-            'id': best_known_person.id if best_known_person is not None else None,
-            'name': best_known_person.name if best_known_person is not None else None,
-            'relationship': best_known_person.relationship if best_known_person is not None else None,
+            'id': best_known_person.id if matched and best_known_person is not None else None,
+            'name': best_known_person.name if matched and best_known_person is not None else None,
+            'relationship': best_known_person.relationship if matched and best_known_person is not None else None,
             'patient_id': patient.id,
             'last_summary': last_summary,
         }, status=status.HTTP_200_OK)

@@ -22,6 +22,7 @@ from .models import FaceEncoding
 from PIL import Image, ImageDraw
 import io
 import numpy as np
+from unittest.mock import patch
 
 
 class RecognitionServiceTests(TestCase):
@@ -222,5 +223,17 @@ class RecognitionEndpointTests(APITestCase):
             {'image': bad_image, 'source': 'phone_camera'},
             format='multipart',
         )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    def test_phone_auto_capture_does_not_fallback_to_known_person_reference(self):
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        with patch('recognition.views.detect_face', side_effect=NoFaceDetectedError('No face detected')):
+            response = self.client.post(
+                reverse('identify-known-person'),
+                {'image': self._make_image(color=(255, 255, 0)), 'source': 'phone_auto_capture'},
+                format='multipart',
+            )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('detail', response.data)

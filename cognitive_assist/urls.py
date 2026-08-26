@@ -12,6 +12,7 @@ urlpatterns = [
     path('api/conversations/', include('conversations.urls')),
     path('api/history/', include('history.urls')),
     path('api/patients/', include('geofencing.urls')),
+    path('api/cognitive/', include('cognitive_features.urls')),
 ]
 
 if settings.DEBUG:

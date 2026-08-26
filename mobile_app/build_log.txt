@@ -1,0 +1,931 @@
+﻿Resolving dependencies...
+Downloading packages...
+  _flutterfire_internals 1.3.73 (1.3.76 available)
+  camera_android_camerax 0.7.4+1 (0.7.4+4 available)
+  camera_web 0.3.5+4 (0.3.5+5 available)
+  firebase_core 4.11.0 (4.13.0 available)
+  firebase_core_platform_interface 7.1.0 (8.1.0 available)
+  firebase_core_web 3.9.0 (3.10.0 available)
+  firebase_messaging 16.4.1 (16.5.0 available)
+  firebase_messaging_platform_interface 4.9.0 (4.9.3 available)
+  firebase_messaging_web 4.2.1 (4.2.4 available)
+  flutter_lints 2.0.3 (6.0.0 available)
+  flutter_local_notifications 19.5.0 (22.3.0 available)
+  flutter_local_notifications_linux 6.0.0 (8.0.1 available)
+  flutter_local_notifications_platform_interface 9.1.0 (12.2.0 available)
+  flutter_local_notifications_windows 1.0.3 (3.1.1 available)
+  geolocator 10.1.1 (14.0.3 available)
+  geolocator_android 4.6.2 (5.0.3 available)
+  geolocator_web 2.2.1 (4.1.4 available)
+  google_maps 8.2.0 (8.3.0 available)
+  google_maps_flutter 2.4.0 (2.18.0 available)
+! google_maps_flutter_android 2.1.10 (overridden) (2.19.12 available)
+! google_maps_flutter_platform_interface 2.4.0 (overridden) (2.16.0 available)
+  google_maps_flutter_web 0.5.14+3 (0.6.3 available)
+  image_picker 0.8.9 (1.2.3 available)
+  image_picker_for_web 2.2.0 (3.1.1 available)
+  lints 2.1.1 (6.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  meta 1.18.0 (1.19.0 available)
+  mime 1.0.6 (2.0.0 available)
+  permission_handler 12.0.3 (13.0.0 available)
+  permission_handler_android 13.0.1 (14.0.0 available)
+  permission_handler_apple 9.4.10 (9.5.1 available)
+  permission_handler_html 0.1.3+5 (0.1.4+1 available)
+  permission_handler_platform_interface 4.3.0 (4.4.0 available)
+  permission_handler_windows 0.2.1 (0.2.2 available)
+  record_web 2.1.1 (2.1.2 available)
+  record_windows 2.2.2 (2.2.3 available)
+  test_api 0.7.11 (0.7.13 available)
+  timezone 0.10.1 (0.11.1 available)
+  uuid 4.5.3 (4.6.0 available)
+  vector_math 2.2.0 (2.4.2 available)
+  xml 6.6.1 (7.0.1 available)
+Got dependencies!
+41 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Gradle task 'assembleDebug'...                          
+flutter : ../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_i
+os-2.18.4/lib/src/google_maps_flutter_ios.dart:186:10: Error: Type 
+'GroundOverlayTapEvent' not found.
+At line:1 char:76
++ ... ve\mobile_app'; flutter clean; flutter build apk --debug 2>&1 | Out-F ...
++                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (../../../AppDat...ent' not found. 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Stream<GroundOverlayTapEvent> onGroundOverlayTap({required int mapId}) {
+         ^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:201:10: Error: Type 'ClusterTapEvent' not 
+found.
+  Stream<ClusterTapEvent> onClusterTap({required int mapId}) {
+         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:256:31: Error: Type 'HeatmapUpdates' not 
+found.
+  Future<void> updateHeatmaps(HeatmapUpdates heatmapUpdates, {required int 
+mapId}) {
+                              ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:281:5: Error: Type 
+'ClusterManagerUpdates' not found.
+    ClusterManagerUpdates clusterManagerUpdates, {
+    ^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:296:5: Error: Type 'GroundOverlayUpdates' 
+not found.
+    GroundOverlayUpdates groundOverlayUpdates, {
+    ^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:335:5: Error: Type 
+'CameraUpdateAnimationConfiguration' not found.
+    CameraUpdateAnimationConfiguration configuration, {
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:542:10: Error: Type 'Cluster' not found.
+  static Cluster clusterFromPlatformCluster(PlatformCluster cluster) {
+         ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:581:54: Error: Type 'Heatmap' not found.
+  static PlatformHeatmap _platformHeatmapFromHeatmap(Heatmap heatmap) {
+                                                     ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:595:5: Error: Type 'HeatmapGradient' not 
+found.
+    HeatmapGradient? gradient,
+    ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:639:5: Error: Type 'GroundOverlay' not 
+found.
+    GroundOverlay groundOverlay,
+    ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:708:5: Error: Type 'ClusterManager' not 
+found.
+    ClusterManager clusterManager,
+    ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:773:71: Error: Type 'MapBitmapScaling' 
+not found.
+  static PlatformMapBitmapScaling 
+platformMapBitmapScalingFromScaling(MapBitmapScaling scaling) {
+                                                                      
+^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:794:5: Error: Type 
+'MarkerCollisionBehavior' not found.
+    MarkerCollisionBehavior collisionBehavior,
+    ^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1085:66: Error: Type 'WeightedLatLng' not 
+found.
+PlatformWeightedLatLng 
+_platformWeightedLatLngFromWeightedLatLng(WeightedLatLng weightedLatLng) {
+                                                                 ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1168:54: Error: Type 'MarkerType' not 
+found.
+PlatformMarkerType _platformMarkerTypeFromMarkerType(MarkerType markerType) {
+                                                     ^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:80:10: Error: Type 'Heatmap' not found.
+  Future<Heatmap?> getHeatmapInfo(HeatmapId heatmapId, {required int mapId}) 
+async {
+         ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:80:35: Error: Type 'HeatmapId' not found.
+  Future<Heatmap?> getHeatmapInfo(HeatmapId heatmapId, {required int mapId}) 
+async {
+                                  ^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:103:10: Error: Type 'GroundOverlay' not 
+found.
+  Future<GroundOverlay?> getGroundOverlayInfo(
+         ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:104:5: Error: Type 'GroundOverlayId' not 
+found.
+    GroundOverlayId groundOverlayId, {
+    ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:183:15: Error: Type 'Cluster' not found.
+  Future<List<Cluster>> getClusters({
+              ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:185:14: Error: Type 'ClusterManagerId' 
+not found.
+    required ClusterManagerId clusterManagerId,
+             ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:208:10: Error: Type 'HeatmapGradient' 
+not found.
+  static HeatmapGradient? _deserializeHeatmapGradient(PlatformHeatmapGradient? 
+gradient) {
+         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:226:10: Error: Type 'WeightedLatLng' not 
+found.
+  static WeightedLatLng _deserializeWeightedLatLng(PlatformWeightedLatLng 
+weightedLatLng) {
+         ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:187:37: Error: 'GroundOverlayTapEvent' 
+isn't a type.
+    return _events(mapId).whereType<GroundOverlayTapEvent>();
+                                    ^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:202:37: Error: 'ClusterTapEvent' isn't a 
+type.
+    return _events(mapId).whereType<ClusterTapEvent>();
+                                    ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:256:31: Error: 'HeatmapUpdates' isn't a 
+type.
+  Future<void> updateHeatmaps(HeatmapUpdates heatmapUpdates, {required int 
+mapId}) {
+                              ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:260:46: Error: 'HeatmapId' isn't a type.
+      heatmapUpdates.heatmapIdsToRemove.map((HeatmapId id) => 
+id.value).toList(),
+                                             ^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:281:5: Error: 'ClusterManagerUpdates' 
+isn't a type.
+    ClusterManagerUpdates clusterManagerUpdates, {
+    ^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:289:17: Error: 'ClusterManagerId' isn't a 
+type.
+          .map((ClusterManagerId id) => id.value)
+                ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:296:5: Error: 'GroundOverlayUpdates' 
+isn't a type.
+    GroundOverlayUpdates groundOverlayUpdates, {
+    ^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:301:10: Error: 'GroundOverlay' isn't a 
+type.
+        (GroundOverlay groundOverlay) =>
+         ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:314:58: Error: 'GroundOverlayId' isn't a 
+type.
+      groundOverlayUpdates.groundOverlayIdsToRemove.map((GroundOverlayId id) 
+=> id.value).toList(),
+                                                         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:327:13: Error: Not a constant expression.
+      const CameraUpdateAnimationConfiguration(),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:335:5: Error: 
+'CameraUpdateAnimationConfiguration' isn't a type.
+    CameraUpdateAnimationConfiguration configuration, {
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:420:10: Error: 'GroundOverlay' isn't a 
+type.
+        (GroundOverlay groundOverlay) =>
+         ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:419:18: Error: The getter 
+'groundOverlays' isn't defined for the type 'MapObjects'.
+ - 'MapObjects' is from 
+'package:google_maps_flutter_platform_interface/src/types/map_objects.dart' ('.
+./../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_int
+erface-2.4.0/lib/src/types/map_objects.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'groundOverlays'.
+      mapObjects.groundOverlays.every(
+                 ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:435:35: Error: The getter 'heatmaps' 
+isn't defined for the type 'MapObjects'.
+ - 'MapObjects' is from 
+'package:google_maps_flutter_platform_interface/src/types/map_objects.dart' ('.
+./../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_int
+erface-2.4.0/lib/src/types/map_objects.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'heatmaps'.
+      initialHeatmaps: 
+mapObjects.heatmaps.map(_platformHeatmapFromHeatmap).toList(),
+                                  ^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:439:42: Error: The getter 
+'clusterManagers' isn't defined for the type 'MapObjects'.
+ - 'MapObjects' is from 
+'package:google_maps_flutter_platform_interface/src/types/map_objects.dart' ('.
+./../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_int
+erface-2.4.0/lib/src/types/map_objects.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'clusterManagers'.
+      initialClusterManagers: mapObjects.clusterManagers
+                                         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:442:41: Error: The getter 
+'groundOverlays' isn't defined for the type 'MapObjects'.
+ - 'MapObjects' is from 
+'package:google_maps_flutter_platform_interface/src/types/map_objects.dart' ('.
+./../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_int
+erface-2.4.0/lib/src/types/map_objects.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'groundOverlays'.
+      initialGroundOverlays: mapObjects.groundOverlays
+                                        ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:544:7: Error: Method not found: 
+'ClusterManagerId'.
+      ClusterManagerId(cluster.clusterManagerId),
+      ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:543:12: Error: Method not found: 
+'Cluster'.
+    return Cluster(
+           ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:581:54: Error: 'Heatmap' isn't a type.
+  static PlatformHeatmap _platformHeatmapFromHeatmap(Heatmap heatmap) {
+                                                     ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:582:11: Error: 'HeatmapGradient' isn't a 
+type.
+    final HeatmapGradient? gradient = heatmap.gradient;
+          ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:595:5: Error: 'HeatmapGradient' isn't a 
+type.
+    HeatmapGradient? gradient,
+    ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:602:17: Error: 'HeatmapGradientColor' 
+isn't a type.
+          .map((HeatmapGradientColor c) => _platformColorFromColor(c.color))
+                ^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:604:41: Error: 'HeatmapGradientColor' 
+isn't a type.
+      startPoints: gradient.colors.map((HeatmapGradientColor c) => 
+c.startPoint).toList(),
+                                        ^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:632:36: Error: 'AdvancedMarker' isn't a 
+type.
+      collisionBehavior: marker is AdvancedMarker
+                                   ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:629:22: Error: The getter 'zIndexInt' 
+isn't defined for the type 'Marker'.
+ - 'Marker' is from 
+'package:google_maps_flutter_platform_interface/src/types/marker.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/marker.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'zIndexInt'.
+      zIndex: marker.zIndexInt,
+                     ^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:631:32: Error: The getter 
+'clusterManagerId' isn't defined for the type 'Marker'.
+ - 'Marker' is from 
+'package:google_maps_flutter_platform_interface/src/types/marker.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/marker.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'clusterManagerId'.
+      clusterManagerId: marker.clusterManagerId?.value,
+                               ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:633:79: Error: The getter 
+'collisionBehavior' isn't defined for the type 'Marker'.
+ - 'Marker' is from 
+'package:google_maps_flutter_platform_interface/src/types/marker.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/marker.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'collisionBehavior'.
+          ? platformMarkerCollisionBehaviorFromMarkerCollisionBehavior(marker.c
+ollisionBehavior)
+                                                                              
+^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:639:5: Error: 'GroundOverlay' isn't a 
+type.
+    GroundOverlay groundOverlay,
+    ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:708:5: Error: 'ClusterManager' isn't a 
+type.
+    ClusterManager clusterManager,
+    ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:715:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.newCameraPosition:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:716:19: Error: 
+'CameraUpdateNewCameraPosition' isn't a type.
+        update as CameraUpdateNewCameraPosition;
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:722:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.newLatLng:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:723:19: Error: 'CameraUpdateNewLatLng' 
+isn't a type.
+        update as CameraUpdateNewLatLng;
+                  ^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:729:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.newLatLngZoom:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:730:19: Error: 
+'CameraUpdateNewLatLngZoom' isn't a type.
+        update as CameraUpdateNewLatLngZoom;
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:737:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.newLatLngBounds:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:738:19: Error: 
+'CameraUpdateNewLatLngBounds' isn't a type.
+        update as CameraUpdateNewLatLngBounds;
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:745:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.zoomTo:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:746:19: Error: 'CameraUpdateZoomTo' isn't 
+a type.
+        update as CameraUpdateZoomTo;
+                  ^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:748:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.zoomBy:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:749:19: Error: 'CameraUpdateZoomBy' isn't 
+a type.
+        update as CameraUpdateZoomBy;
+                  ^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:757:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.zoomIn:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:758:19: Error: 'CameraUpdateZoomIn' isn't 
+a type.
+        update as CameraUpdateZoomIn;
+                  ^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:760:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.zoomOut:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:761:19: Error: 'CameraUpdateZoomOut' 
+isn't a type.
+        update as CameraUpdateZoomOut;
+                  ^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:763:12: Error: Undefined name 
+'CameraUpdateType'.
+      case CameraUpdateType.scrollBy:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:764:19: Error: 'CameraUpdateScrollBy' 
+isn't a type.
+        update as CameraUpdateScrollBy;
+                  ^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:714:20: Error: The getter 'updateType' 
+isn't defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'updateType'.
+    switch (update.updateType) {
+                   ^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:719:78: Error: The getter 
+'cameraPosition' isn't defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'cameraPosition'.
+            cameraPosition: 
+_platformCameraPositionFromCameraPosition(update.cameraPosition),
+                                                                             
+^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:726:54: Error: The getter 'latLng' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'latLng'.
+            latLng: _platformLatLngFromLatLng(update.latLng),
+                                                     ^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:733:54: Error: The getter 'latLng' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'latLng'.
+            latLng: _platformLatLngFromLatLng(update.latLng),
+                                                     ^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:734:26: Error: The getter 'zoom' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'zoom'.
+            zoom: update.zoom,
+                         ^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:741:66: Error: The getter 'bounds' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'bounds'.
+            bounds: _platformLatLngBoundsFromLatLngBounds(update.bounds)!,
+                                                                 ^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:742:29: Error: The getter 'padding' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'padding'.
+            padding: update.padding,
+                            ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:747:91: Error: The getter 'zoom' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'zoom'.
+        return PlatformCameraUpdate(cameraUpdate: 
+PlatformCameraUpdateZoomTo(zoom: update.zoom));
+                                                                               
+           ^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:750:38: Error: The getter 'focus' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'focus'.
+        final Offset? focus = update.focus;
+                                     ^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:753:28: Error: The getter 'amount' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'amount'.
+            amount: update.amount,
+                           ^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:766:65: Error: The getter 'dx' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'dx'.
+          cameraUpdate: PlatformCameraUpdateScrollBy(dx: update.dx, dy: 
+update.dy),
+                                                                ^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:766:80: Error: The getter 'dy' isn't 
+defined for the type 'CameraUpdate'.
+ - 'CameraUpdate' is from 
+'package:google_maps_flutter_platform_interface/src/types/camera.dart' ('../../
+../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_interfac
+e-2.4.0/lib/src/types/camera.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'dy'.
+          cameraUpdate: PlatformCameraUpdateScrollBy(dx: update.dx, dy: 
+update.dy),
+                                                                               
+^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:713:31: Error: A non-null value must be 
+returned since the return type 'PlatformCameraUpdate' doesn't allow null.
+ - 'PlatformCameraUpdate' is from 
+'package:google_maps_flutter_ios/src/messages.g.dart' ('../../../AppData/Local/
+Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/messages.g.dart
+').
+  static PlatformCameraUpdate 
+_platformCameraUpdateFromCameraUpdate(CameraUpdate update) {
+                              ^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:773:71: Error: 'MapBitmapScaling' isn't a 
+type.
+  static PlatformMapBitmapScaling 
+platformMapBitmapScalingFromScaling(MapBitmapScaling scaling) {
+                                                                      
+^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:775:12: Error: Undefined name 
+'MapBitmapScaling'.
+      case MapBitmapScaling.auto:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:777:12: Error: Undefined name 
+'MapBitmapScaling'.
+      case MapBitmapScaling.none:
+           ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:794:5: Error: 'MarkerCollisionBehavior' 
+isn't a type.
+    MarkerCollisionBehavior collisionBehavior,
+    ^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:797:12: Error: Undefined name 
+'MarkerCollisionBehavior'.
+      case MarkerCollisionBehavior.requiredDisplay:
+           ^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:799:12: Error: Undefined name 
+'MarkerCollisionBehavior'.
+      case MarkerCollisionBehavior.optionalAndHidesLowerPriority:
+           ^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:801:12: Error: Undefined name 
+'MarkerCollisionBehavior'.
+      case MarkerCollisionBehavior.requiredAndHidesOptional:
+           ^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:818:18: Error: 'DefaultMarker' isn't a 
+type.
+      case final DefaultMarker marker:
+                 ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:822:18: Error: 'BytesBitmap' isn't a type.
+      case final BytesBitmap bytes:
+                 ^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:830:18: Error: 'AssetBitmap' isn't a type.
+      case final AssetBitmap asset:
+                 ^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:836:18: Error: 'AssetImageBitmap' isn't a 
+type.
+      case final AssetImageBitmap asset:
+                 ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:845:18: Error: 'AssetMapBitmap' isn't a 
+type.
+      case final AssetMapBitmap asset:
+                 ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:855:18: Error: 'BytesMapBitmap' isn't a 
+type.
+      case final BytesMapBitmap bytes:
+                 ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:865:18: Error: 'PinConfig' isn't a type.
+      case final PinConfig pinConfig:
+                 ^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:873:22: Error: 'CircleGlyph' isn't a type.
+          case final CircleGlyph circleGlyph:
+                     ^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:881:22: Error: 'TextGlyph' isn't a type.
+          case final TextGlyph textGlyph:
+                     ^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:892:22: Error: 'BitmapGlyph' isn't a type.
+          case final BitmapGlyph bitmapGlyph:
+                     ^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:995:7: Error: The method 
+'ClusterTapEvent' isn't defined for the type 'HostMapMessageHandler'.
+ - 'HostMapMessageHandler' is from 
+'package:google_maps_flutter_ios/src/google_maps_flutter_ios.dart' ('../../../A
+ppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/go
+ogle_maps_flutter_ios.dart').
+Try correcting the name to the name of an existing method, or defining a 
+method named 'ClusterTapEvent'.
+      ClusterTapEvent(mapId, 
+GoogleMapsFlutterIOS.clusterFromPlatformCluster(cluster)),
+      ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1047:55: Error: The method 
+'GroundOverlayId' isn't defined for the type 'HostMapMessageHandler'.
+ - 'HostMapMessageHandler' is from 
+'package:google_maps_flutter_ios/src/google_maps_flutter_ios.dart' ('../../../A
+ppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/go
+ogle_maps_flutter_ios.dart').
+Try correcting the name to the name of an existing method, or defining a 
+method named 'GroundOverlayId'.
+    streamController.add(GroundOverlayTapEvent(mapId, 
+GroundOverlayId(groundOverlayId)));
+                                                      ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1047:26: Error: The method 
+'GroundOverlayTapEvent' isn't defined for the type 'HostMapMessageHandler'.
+ - 'HostMapMessageHandler' is from 
+'package:google_maps_flutter_ios/src/google_maps_flutter_ios.dart' ('../../../A
+ppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/go
+ogle_maps_flutter_ios.dart').
+Try correcting the name to the name of an existing method, or defining a 
+method named 'GroundOverlayTapEvent'.
+    streamController.add(GroundOverlayTapEvent(mapId, 
+GroundOverlayId(groundOverlayId)));
+                         ^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1085:66: Error: 'WeightedLatLng' isn't a 
+type.
+PlatformWeightedLatLng 
+_platformWeightedLatLngFromWeightedLatLng(WeightedLatLng weightedLatLng) {
+                                                                 ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1162:72: Error: Undefined name 
+'MarkerType'.
+    markerType: _platformMarkerTypeFromMarkerType(config.markerType ?? 
+MarkerType.marker),
+                                                                       
+^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1162:58: Error: The getter 'markerType' 
+isn't defined for the type 'MapConfiguration'.
+ - 'MapConfiguration' is from 'package:google_maps_flutter_platform_interface/s
+rc/types/map_configuration.dart' ('../../../AppData/Local/Pub/Cache/hosted/pub.
+dev/google_maps_flutter_platform_interface-2.4.0/lib/src/types/map_configuratio
+n.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'markerType'.
+    markerType: _platformMarkerTypeFromMarkerType(config.markerType ?? 
+MarkerType.marker),
+                                                         ^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1163:19: Error: The getter 'mapId' isn't 
+defined for the type 'MapConfiguration'.
+ - 'MapConfiguration' is from 'package:google_maps_flutter_platform_interface/s
+rc/types/map_configuration.dart' ('../../../AppData/Local/Pub/Cache/hosted/pub.
+dev/google_maps_flutter_platform_interface-2.4.0/lib/src/types/map_configuratio
+n.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'mapId'.
+    mapId: config.mapId,
+                  ^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1164:19: Error: The getter 'style' isn't 
+defined for the type 'MapConfiguration'.
+ - 'MapConfiguration' is from 'package:google_maps_flutter_platform_interface/s
+rc/types/map_configuration.dart' ('../../../AppData/Local/Pub/Cache/hosted/pub.
+dev/google_maps_flutter_platform_interface-2.4.0/lib/src/types/map_configuratio
+n.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'style'.
+    style: config.style,
+                  ^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1168:54: Error: 'MarkerType' isn't a type.
+PlatformMarkerType _platformMarkerTypeFromMarkerType(MarkerType markerType) {
+                                                     ^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1170:10: Error: Undefined name 
+'MarkerType'.
+    case MarkerType.marker:
+         ^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1172:10: Error: Undefined name 
+'MarkerType'.
+    case MarkerType.advancedMarker:
+         ^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1311:10: Error: Undefined name 
+'PatternItemType'.
+    case PatternItemType.dot:
+         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1313:10: Error: Undefined name 
+'PatternItemType'.
+    case PatternItemType.dash:
+         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1314:38: Error: 
+'VariableLengthPatternItem' isn't a type.
+      final double length = (item as VariableLengthPatternItem).length;
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1316:10: Error: Undefined name 
+'PatternItemType'.
+    case PatternItemType.gap:
+         ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1317:38: Error: 
+'VariableLengthPatternItem' isn't a type.
+      final double length = (item as VariableLengthPatternItem).length;
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_maps_flutter_ios.dart:1310:16: Error: The getter 'type' isn't 
+defined for the type 'PatternItem'.
+ - 'PatternItem' is from 
+'package:google_maps_flutter_platform_interface/src/types/pattern_item.dart' ('
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_platform_in
+terface-2.4.0/lib/src/types/pattern_item.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'type'.
+  switch (item.type) {
+               ^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:80:35: Error: 'HeatmapId' isn't a type.
+  Future<Heatmap?> getHeatmapInfo(HeatmapId heatmapId, {required int mapId}) 
+async {
+                                  ^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:93:15: Error: The getter 'HeatmapRadius' 
+isn't defined for the type 'GoogleMapsInspectorIOS'.
+ - 'GoogleMapsInspectorIOS' is from 
+'package:google_maps_flutter_ios/src/google_map_inspector_ios.dart' ('../../../
+AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/g
+oogle_map_inspector_ios.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'HeatmapRadius'.
+      radius: HeatmapRadius.fromPixels(heatmapInfo.radius),
+              ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:88:12: Error: The method 'Heatmap' isn't 
+defined for the type 'GoogleMapsInspectorIOS'.
+ - 'GoogleMapsInspectorIOS' is from 
+'package:google_maps_flutter_ios/src/google_map_inspector_ios.dart' ('../../../
+AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/g
+oogle_map_inspector_ios.dart').
+Try correcting the name to the name of an existing method, or defining a 
+method named 'Heatmap'.
+    return Heatmap(
+           ^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:104:5: Error: 'GroundOverlayId' isn't a 
+type.
+    GroundOverlayId groundOverlayId, {
+    ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:118:22: Error: The getter 
+'MapBitmapScaling' isn't defined for the type 'GoogleMapsInspectorIOS'.
+ - 'GoogleMapsInspectorIOS' is from 
+'package:google_maps_flutter_ios/src/google_map_inspector_ios.dart' ('../../../
+AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/g
+oogle_map_inspector_ios.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'MapBitmapScaling'.
+      bitmapScaling: MapBitmapScaling.none,
+                     ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:116:24: Error: The method 
+'BytesMapBitmap' isn't defined for the type 'GoogleMapsInspectorIOS'.
+ - 'GoogleMapsInspectorIOS' is from 
+'package:google_maps_flutter_ios/src/google_map_inspector_ios.dart' ('../../../
+AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/g
+oogle_map_inspector_ios.dart').
+Try correcting the name to the name of an existing method, or defining a 
+method named 'BytesMapBitmap'.
+    final dummyImage = BytesMapBitmap(
+                       ^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:125:14: Error: The getter 
+'GroundOverlay' isn't defined for the type 'GoogleMapsInspectorIOS'.
+ - 'GoogleMapsInspectorIOS' is from 
+'package:google_maps_flutter_ios/src/google_map_inspector_ios.dart' ('../../../
+AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/g
+oogle_map_inspector_ios.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'GroundOverlay'.
+      return GroundOverlay.fromPosition(
+             ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:138:14: Error: The getter 
+'GroundOverlay' isn't defined for the type 'GoogleMapsInspectorIOS'.
+ - 'GoogleMapsInspectorIOS' is from 
+'package:google_maps_flutter_ios/src/google_map_inspector_ios.dart' ('../../../
+AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/lib/src/g
+oogle_map_inspector_ios.dart').
+Try correcting the name to the name of an existing getter, or defining a 
+getter or field named 'GroundOverlay'.
+      return GroundOverlay.fromBounds(
+             ^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:185:14: Error: 'ClusterManagerId' isn't 
+a type.
+    required ClusterManagerId clusterManagerId,
+             ^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:217:41: Error: Method not found: 
+'HeatmapGradientColor'.
+        (PlatformColor color, int i) => HeatmapGradientColor(
+                                        ^^^^^^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:212:12: Error: Method not found: 
+'HeatmapGradient'.
+    return HeatmapGradient(
+           ^^^^^^^^^^^^^^^
+../../../AppData/Local/Pub/Cache/hosted/pub.dev/google_maps_flutter_ios-2.18.4/
+lib/src/google_map_inspector_ios.dart:227:12: Error: Method not found: 
+'WeightedLatLng'.
+    return WeightedLatLng(
+           ^^^^^^^^^^^^^^
+Target kernel_snapshot_program failed: Exception
+
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileFlutterBuildDebug'.
+> Process 'command 'C:\Users\manas\development\flutter\bin\flutter.bat'' 
+finished with non-zero exit value 1
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1m 12s
+Running Gradle task 'assembleDebug'...                             73.3s
+Gradle task assembleDebug failed with exit code 1

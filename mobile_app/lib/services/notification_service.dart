@@ -10,6 +10,7 @@ import '../screens/patient_location_screen.dart';
 import '../screens/patient_recognition_result_screen.dart';
 import 'auth_service.dart';
 import 'recognition_service.dart';
+import 'api_client.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
@@ -22,11 +23,33 @@ class NotificationService {
   static const _pendingKnownPersonNameKey = 'pending_known_person_name';
   static const _pendingKnownPersonRelationshipKey = 'pending_known_person_relationship';
   static const _pendingKnownPersonSummaryKey = 'pending_known_person_summary';
+  static const _pendingKnownPersonPatientIdKey = 'pending_known_person_patient_id';
 
   static const _pendingGeofencePatientIdKey = 'pending_geofence_patient_id';
   static const _pendingGeofencePatientNameKey = 'pending_geofence_patient_name';
   static const _pendingGeofenceLatKey = 'pending_geofence_lat';
   static const _pendingGeofenceLngKey = 'pending_geofence_lng';
+
+  static Future<bool> openKnownPersonMatch(
+    Map<String, dynamic> data, {
+    String? sessionTokenOverride,
+  }) async {
+    if (data['match']?.toString().toLowerCase() != 'true') return false;
+    final knownPersonId = int.tryParse(
+      (data['known_person_id'] ?? data['id'])?.toString() ?? '',
+    );
+    if (knownPersonId == null) return false;
+    final navigated = await _navigateToKnownPersonResult(
+      knownPersonId: knownPersonId,
+      patientId: int.tryParse(data['patient_id']?.toString() ?? ''),
+      name: data['name'] as String?,
+      relationship: data['relationship'] as String?,
+      lastSummary: data['last_summary'] as String?,
+      sessionTokenOverride: sessionTokenOverride,
+    );
+    if (!navigated) await _persistPendingKnownPersonPush(data);
+    return navigated;
+  }
 
   static Future<void> initialize() async {
     if (kIsWeb) {
@@ -77,51 +100,105 @@ class NotificationService {
       _handleForegroundKnownPersonPush(message.data);
     });
 
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      openKnownPersonMatch(message.data);
+    });
+
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      await openKnownPersonMatch(initialMessage.data);
+    }
+
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
   }
 
-  static void _handleForegroundKnownPersonPush(Map<String, dynamic> data) {
+  static Future<void> _handleForegroundKnownPersonPush(Map<String, dynamic> data) async {
+    if (data['match']?.toString().toLowerCase() != 'true') return;
     final knownPersonId = int.tryParse(data['known_person_id']?.toString() ?? '');
     if (knownPersonId == null) return;
+    final name = (data['name'] as String?)?.trim() ?? '';
+    if (name.isEmpty || name.toLowerCase().startsWith('unnamed') ||
+        {'unknown', 'unknown person', 'person'}.contains(name.toLowerCase())) {
+      return;
+    }
 
-    _navigateToKnownPersonResult(
+    var navigated = await _navigateToKnownPersonResult(
       knownPersonId: knownPersonId,
-      name: data['name'] as String?,
+      patientId: int.tryParse(data['patient_id']?.toString() ?? ''),
+      name: name,
       relationship: data['relationship'] as String?,
       lastSummary: data['last_summary'] as String?,
     );
+    if (!navigated) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      navigated = await _navigateToKnownPersonResult(
+        knownPersonId: knownPersonId,
+        patientId: int.tryParse(data['patient_id']?.toString() ?? ''),
+        name: name,
+        relationship: data['relationship'] as String?,
+        lastSummary: data['last_summary'] as String?,
+      );
+    }
+    if (!navigated) {
+      await _persistPendingKnownPersonPush(data);
+    }
   }
 
   /// Attempts to navigate straight to the recognition result screen for a
   /// known-person push. Requires an active patient session (sessionToken +
   /// patientId) and a live navigator; if either is missing, does nothing.
   /// Returns true if navigation happened.
-  static bool _navigateToKnownPersonResult({
+  static Future<bool> _navigateToKnownPersonResult({
     required int knownPersonId,
+    int? patientId,
     required String? name,
     required String? relationship,
     required String? lastSummary,
-  }) {
+    String? sessionTokenOverride,
+  }) async {
+    final normalizedName = name?.trim().toLowerCase() ?? '';
+    if (normalizedName.isEmpty || normalizedName.startsWith('unnamed') ||
+        {'unknown', 'unknown person', 'person'}.contains(normalizedName)) {
+      return false;
+    }
     final context = navigatorKey.currentContext;
     if (context == null) return false;
 
-    final sessionToken = Provider.of<AuthService>(context, listen: false).patientSessionToken;
-    final patientId = Provider.of<RecognitionService>(context, listen: false).patientId;
-    if (sessionToken == null || patientId == null) return false;
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final recognitionService = Provider.of<RecognitionService>(context, listen: false);
+    var sessionToken = sessionTokenOverride ?? authService.patientSessionToken;
+    var resolvedPatientId = recognitionService.patientId ?? patientId;
+    if (sessionToken == null && resolvedPatientId != null) {
+      final response = await ApiClient().post(
+        '/recognition/issue-patient-session-token/',
+        body: {'patient_id': resolvedPatientId, 'device_id': 'phone_push'},
+      );
+      if (response.statusCode == 200) {
+        final payload = json.decode(response.body) as Map<String, dynamic>;
+        sessionToken = payload['patient_session_token'] as String?;
+        resolvedPatientId = payload['patient_id'] as int? ?? resolvedPatientId;
+        if (sessionToken != null) {
+          authService.setPatientSessionToken(sessionToken);
+        }
+      }
+    }
+    final activeSessionToken = sessionToken;
+    final activePatientId = resolvedPatientId;
+    final activeName = name;
+    if (activeSessionToken == null || activePatientId == null || activeName == null || activeName.trim().isEmpty) return false;
+    recognitionService.patientId = activePatientId;
 
     navigatorKey.currentState?.push(
       MaterialPageRoute(
         builder: (_) => PatientRecognitionResultScreen(
-          patientId: patientId,
+          patientId: activePatientId,
           knownPersonId: knownPersonId,
-          knownPersonName: name ?? 'Person',
+          knownPersonName: activeName,
           knownPersonRelationship: relationship,
-          sessionToken: sessionToken,
+          sessionToken: activeSessionToken,
           initialLastSummary: lastSummary,
-          // This screen only opens via the known-person FCM push, which the
-          // backend now only sends for specs-hardware detections (see
-          // IdentifyKnownPersonView.post) -- the specs are already
-          // recording the conversation, so the phone must not record too.
+          // Hardware recognition already records the conversation; the
+          // phone should only show the result page.
           recordFromPhone: false,
         ),
       ),
@@ -226,12 +303,20 @@ class NotificationService {
   /// here instead of navigated to directly. consumePendingKnownPersonPush()
   /// picks it back up once the app has a live patient session again.
   static Future<void> _persistPendingKnownPersonPush(Map<String, dynamic> data) async {
+    if (data['match']?.toString().toLowerCase() != 'true') return;
     final knownPersonId = int.tryParse(data['known_person_id']?.toString() ?? '');
     if (knownPersonId == null) return;
+    final name = (data['name'] as String?)?.trim() ?? '';
+    if (name.isEmpty || name.toLowerCase().startsWith('unnamed') ||
+        {'unknown', 'unknown person', 'person'}.contains(name.toLowerCase())) {
+      return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_pendingKnownPersonIdKey, knownPersonId);
-    await _setOrRemove(prefs, _pendingKnownPersonNameKey, data['name'] as String?);
+    final patientId = int.tryParse(data['patient_id']?.toString() ?? '');
+    if (patientId != null) await prefs.setInt(_pendingKnownPersonPatientIdKey, patientId);
+    await _setOrRemove(prefs, _pendingKnownPersonNameKey, name);
     await _setOrRemove(prefs, _pendingKnownPersonRelationshipKey, data['relationship'] as String?);
     await _setOrRemove(prefs, _pendingKnownPersonSummaryKey, data['last_summary'] as String?);
   }
@@ -249,8 +334,9 @@ class NotificationService {
     final knownPersonId = prefs.getInt(_pendingKnownPersonIdKey);
     if (knownPersonId == null) return;
 
-    final navigated = _navigateToKnownPersonResult(
+    final navigated = await _navigateToKnownPersonResult(
       knownPersonId: knownPersonId,
+      patientId: prefs.getInt(_pendingKnownPersonPatientIdKey),
       name: prefs.getString(_pendingKnownPersonNameKey),
       relationship: prefs.getString(_pendingKnownPersonRelationshipKey),
       lastSummary: prefs.getString(_pendingKnownPersonSummaryKey),
@@ -261,6 +347,7 @@ class NotificationService {
     await prefs.remove(_pendingKnownPersonNameKey);
     await prefs.remove(_pendingKnownPersonRelationshipKey);
     await prefs.remove(_pendingKnownPersonSummaryKey);
+    await prefs.remove(_pendingKnownPersonPatientIdKey);
   }
 
   static Future<void> _showNotification(String? title, String? body, {String? payload}) async {

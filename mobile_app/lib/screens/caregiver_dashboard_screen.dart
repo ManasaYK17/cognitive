@@ -10,6 +10,8 @@ import 'history_dashboard_screen.dart';
 import 'safe_zone_screen.dart';
 import 'patient_location_screen.dart';
 import 'face_scan_screen.dart';
+import 'reminders_screen.dart';
+import 'improvements_screen.dart';
 
 class CaregiverDashboardScreen extends StatefulWidget {
   const CaregiverDashboardScreen({super.key});
@@ -182,6 +184,22 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                   ),
                 ),
               );
+            },
+          ),
+          const SizedBox(height: 18),
+          _sidebarItem(
+            icon: Icons.notifications,
+            label: 'Reminders',
+            onTap: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => RemindersScreen(patientId: patientId)));
+            },
+          ),
+          const SizedBox(height: 18),
+          _sidebarItem(
+            icon: Icons.psychology,
+            label: 'Improvements',
+            onTap: () {
+              Navigator.of(context).push(MaterialPageRoute(builder: (_) => ImprovementsScreen(patientId: patientId)));
             },
           ),
           const Spacer(),

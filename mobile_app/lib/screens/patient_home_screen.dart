@@ -7,12 +7,15 @@ import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/recognition_service.dart';
+import '../services/cognitive_features_service.dart';
 import '../theme/design_tokens.dart';
 import '../widgets/face_scan_camera.dart';
 import 'caregiver_dashboard_screen.dart';
 import 'caregiver_login_screen.dart';
 import 'patient_history_screen.dart';
 import 'patient_recognition_result_screen.dart';
+import 'cognitive_games_screen.dart';
+import 'reminder_alarm_screen.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   final int patientId;
@@ -30,6 +33,13 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   bool _loadingMemories = true;
   List<dynamic> _recentMemories = [];
   final FlutterTts _flutterTts = FlutterTts();
+  Timer? _recognitionPollTimer;
+  String? _lastHardwareRecognitionTimestamp;
+  bool _openingHardwareResult = false;
+  bool _gameMode = false;
+  Timer? _reminderTimer;
+  bool _openingReminder = false;
+  final CognitiveFeaturesService _features = CognitiveFeaturesService();
 
   @override
   void initState() {
@@ -45,9 +55,93 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     });
     _loadRecentMemories();
     unawaited(_initializeTts());
+    // Hardware recognition can finish while the app is transitioning into
+    // patient mode. Look back briefly so that match is not lost before the
+    // polling timer starts.
+    _lastHardwareRecognitionTimestamp = DateTime.now()
+      .toUtc()
+      .subtract(const Duration(minutes: 2))
+      .toIso8601String();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prepareLocationReporting();
+      _startRecognitionPolling();
+      _checkReminders();
+      _reminderTimer = Timer.periodic(const Duration(seconds: 15), (_) => _checkReminders());
     });
+  }
+
+  void _startRecognitionPolling() {
+    _recognitionPollTimer?.cancel();
+    _reminderTimer?.cancel();
+    _recognitionPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      if (!mounted) return;
+      final response = await _api.get(
+        '/history/patient-recognition/',
+        token: widget.sessionToken,
+        params: {if (_lastHardwareRecognitionTimestamp != null) 'after': _lastHardwareRecognitionTimestamp!},
+      );
+      debugPrint('[patient_home] recognition poll status=${response.statusCode} body=${response.body}');
+      if (!mounted || response.statusCode != 200) return;
+      final payload = json.decode(response.body) as Map<String, dynamic>;
+      if (payload['match'] != true) return;
+      final timestamp = payload['timestamp'] as String?;
+      if (timestamp == null || timestamp == _lastHardwareRecognitionTimestamp) return;
+      if (_openingHardwareResult) return;
+      _openingHardwareResult = true;
+      try {
+        debugPrint('[patient_home] hardware match payload=$payload');
+        final navigated = await _openHardwareResult(payload);
+        if (navigated && mounted) {
+          _lastHardwareRecognitionTimestamp = timestamp;
+        }
+      } catch (error, stackTrace) {
+        debugPrint('[patient_home] failed to open hardware result: $error');
+        debugPrint(stackTrace.toString());
+      } finally {
+        _openingHardwareResult = false;
+      }
+    });
+  }
+
+  Future<void> _checkReminders() async {
+    if (!mounted || widget.sessionToken.isEmpty || _openingReminder) return;
+    _openingReminder = true;
+    try {
+      final reminders = await _features.getReminders(widget.sessionToken);
+      final triggered = reminders.cast<Map<String, dynamic>>().where((item) => item['status'] == 'triggered').toList();
+      if (triggered.isNotEmpty && mounted) {
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReminderAlarmScreen(reminder: triggered.first, sessionToken: widget.sessionToken)));
+      }
+    } catch (_) {} finally { _openingReminder = false; }
+  }
+
+  Future<bool> _openHardwareResult(Map<String, dynamic> payload) async {
+    final knownPersonId = int.tryParse(payload['known_person_id']?.toString() ?? '');
+    final name = payload['name']?.toString().trim() ?? '';
+    if (knownPersonId == null || name.isEmpty || !mounted) return false;
+
+    debugPrint('[patient_home] pushing result screen for knownPersonId=$knownPersonId name=$name');
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PatientRecognitionResultScreen(
+          patientId: widget.patientId,
+          knownPersonId: knownPersonId,
+          knownPersonName: name,
+          knownPersonRelationship: payload['relationship']?.toString(),
+          sessionToken: widget.sessionToken,
+          initialLastSummary: payload['last_summary']?.toString(),
+          recordFromPhone: false,
+        ),
+      ),
+    );
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _recognitionPollTimer?.cancel();
+    _flutterTts.stop();
+    super.dispose();
   }
 
   Future<void> _initializeTts() async {
@@ -123,29 +217,34 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
+    recognitionService.clearRecognizedPerson();
 
-    final result = await navigator.push<FaceScanCaptureResult>(
-      MaterialPageRoute(builder: (_) => const FaceScanCamera()),
-    );
-
+    Map<String, dynamic>? payload;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final result = await navigator.push<FaceScanCaptureResult>(
+        MaterialPageRoute(builder: (_) => const FaceScanCamera()),
+      );
+      if (!mounted) return;
+      if (result == null || result.cancelled || result.image == null) {
+        if (result?.message != null) {
+          messenger.showSnackBar(SnackBar(content: Text(result!.message!)));
+        }
+        setState(() => _scanning = false);
+        return;
+      }
+      final bytes = await result.image!.readAsBytes();
+      payload = await recognitionService.attemptRecognitionFromBytes(
+        bytes,
+        result.image!.name,
+        'phone_auto_capture',
+        sessionTokenOverride: widget.sessionToken,
+      );
+      if (payload?['match'] == true) break;
+    }
     if (!mounted) return;
     setState(() => _scanning = false);
 
-    if (result == null || result.cancelled || result.image == null) {
-      if (result?.message != null) {
-        messenger.showSnackBar(SnackBar(content: Text(result!.message!)));
-      }
-      return;
-    }
-
-    final bytes = await result.image!.readAsBytes();
-    final payload = await recognitionService.attemptRecognitionFromBytes(
-      bytes,
-      result.image!.name,
-      'phone_auto_capture',
-      sessionTokenOverride: widget.sessionToken,
-    );
-    if (payload == null || payload['id'] == null) {
+    if (payload == null || payload['match'] != true) {
       const message = 'Unknown person detected';
       await _announceMessage(message);
       messenger.showSnackBar(
@@ -157,8 +256,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final knownPersonId = payload['id'] as int? ?? 0;
     final knownPersonName = payload['name'] as String? ?? 'Person';
     final knownPersonRelationship = payload['relationship'] as String?;
-    final shouldOpenResult = payload['match'] == true || knownPersonId != 0;
-    if (shouldOpenResult) {
+    if (knownPersonId != 0 && knownPersonName != 'Person') {
       await _announceMessage('Recognized $knownPersonName');
       navigator.push(
         MaterialPageRoute(
@@ -272,7 +370,10 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         automaticallyImplyLeading: false,
+        leading: _gameMode ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _gameMode = false)) : null,
+        title: _gameMode ? const Text('Cognitive Games') : null,
         actions: [
+          Row(children: [const Text('Games', style: TextStyle(fontSize: 15)), Switch(value: _gameMode, onChanged: (value) => setState(() => _gameMode = value))]),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white70),
             tooltip: 'Exit to caregiver sign-in',
@@ -280,7 +381,9 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           ),
         ],
       ),
-      body: SafeArea(
+        body: _gameMode
+          ? CognitiveGamesScreen(patientId: widget.patientId, sessionToken: widget.sessionToken)
+          : SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
           child: Column(

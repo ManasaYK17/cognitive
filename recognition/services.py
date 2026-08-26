@@ -465,6 +465,18 @@ def compute_similarity(a, b) -> float:
     return max(0.0, min(1.0, cosine))
 
 
+def encoding_matches_current_backend(encoding) -> bool:
+    if not isinstance(encoding, list):
+        return False
+    if FaceAnalysis is not None:
+        expected_length = 512
+    elif face_recognition is not None:
+        expected_length = 128
+    else:
+        expected_length = _LBP_GRID[0] * _LBP_GRID[1] * _LBP_BINS
+    return len(encoding) == expected_length
+
+
 def _enhance_low_light(img: Image.Image) -> Image.Image:
     """CLAHE (contrast-limited adaptive histogram equalization) on the L
     channel of LAB -- boosts local contrast in dark/underexposed captures

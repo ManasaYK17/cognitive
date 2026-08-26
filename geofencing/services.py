@@ -51,6 +51,10 @@ def send_fcm_push(device_token, title=None, body=None, data=None):
         notification=notification,
         data=data or {},
         token=device_token,
+        android=messaging_client.AndroidConfig(
+            priority='high',
+            ttl=timedelta(seconds=30),
+        ),
     )
     try:
         response = messaging_client.send(message, app=app)

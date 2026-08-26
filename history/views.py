@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from .models import RecognitionHistory
 from .serializers import HistoryFeedSerializer, PatientHistorySummarySerializer, RecognitionHistorySerializer
 from conversations.models import ConversationHistory
+from known_people.models import KnownPerson
 
 
 class RecognitionHistoryListView(generics.ListAPIView):
@@ -150,3 +151,41 @@ class PatientHistoryView(APIView):
 
         serializer = PatientHistorySummarySerializer(list(latest_by_person.values()), many=True)
         return Response(serializer.data)
+
+class PatientRecognitionView(APIView):
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
+        try:
+            payload = loads(token)
+            patient_id = payload.get('patient_id') if isinstance(payload, dict) else None
+        except Exception:
+            patient_id = None
+        if not patient_id:
+            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        after = request.query_params.get('after')
+        matches = RecognitionHistory.objects.filter(
+            patient_id=patient_id,
+            subject_type='known_person',
+            outcome='matched',
+        ).exclude(source='phone_auto_capture').order_by('-timestamp')
+        if after:
+            matches = matches.filter(timestamp__gt=after)
+        match = matches.first()
+        if match is None or match.subject is None:
+            return Response({'match': False})
+        person = match.subject
+        if not isinstance(person, KnownPerson) or not person.name.strip() or person.name.lower().startswith('unnamed'):
+            return Response({'match': False})
+        return Response({
+            'match': True,
+            'patient_id': patient_id,
+            'known_person_id': person.id,
+            'name': person.name,
+            'relationship': person.relationship,
+            'timestamp': match.timestamp,
+        })

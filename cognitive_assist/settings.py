@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'history',
     'conversations',
     'geofencing',
+    'cognitive_features',
 ]
 
 MIDDLEWARE = [
@@ -131,6 +132,11 @@ RECOGNITION_CONFIDENCE_THRESHOLD = 0.5
 # not just clear the threshold above -- otherwise two similar-looking
 # people can produce near-tied scores and get confidently mismatched.
 RECOGNITION_MATCH_MARGIN = 0.1
+# Automatic phone scans use a stricter threshold until the InsightFace or
+# face-recognition backend is installed; the LBP fallback produces inflated
+# similarities for different faces.
+RECOGNITION_PHONE_AUTO_THRESHOLD = 0.9
+RECOGNITION_PHONE_AUTO_MATCH_MARGIN = 0.15
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL_NAME = os.environ.get('OLLAMA_MODEL_NAME', 'qwen2.5:7b')
 OPENROUTER_API_URL = os.environ.get('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')

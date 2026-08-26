@@ -14,10 +14,10 @@ namespace {
 constexpr uint32_t kIpPrintIntervalMs = 5000;
 constexpr size_t kMinJpegBytes = 4000;     // suspiciously small -> likely blank frame
 constexpr double kMinByteVariance = 300.0; // suspiciously flat -> likely blank/blurred
-constexpr const char *kIdentifyUrl = "http://10.204.67.169:8000/api/recognition/identify-known-person/";
-constexpr const char *kSummarizeUrl = "http://10.204.67.169:8000/api/conversations/summarize/";
-constexpr const char *kTranscribeUrl = "http://10.204.67.169:8000/api/conversations/transcribe/";
-constexpr const char *kCreateFromEncounterUrl = "http://10.204.67.169:8000/api/known-people/create-from-encounter/";
+constexpr const char *kIdentifyUrl = "http://10.204.67.215:8000/api/recognition/identify-known-person/";
+constexpr const char *kSummarizeUrl = "http://10.204.67.215:8000/api/conversations/summarize/";
+constexpr const char *kTranscribeUrl = "http://10.204.67.215:8000/api/conversations/transcribe/";
+constexpr const char *kCreateFromEncounterUrl = "http://10.204.67.215:8000/api/known-people/create-from-encounter/";
 constexpr const char *kMultipartBoundary = "specsFirmwareBoundary";
 // Onboard PDM mic (Seeed XIAO ESP32S3 Sense), read via the newer ESP_I2S.h
 // driver (arduino-esp32 3.x). Replaces the external INMP441 + legacy I2S.h
@@ -88,11 +88,9 @@ constexpr uint32_t kIdentifyDelayMsPlaceholder = 15000;
 // uint16_t, so anything above 65535 silently wraps -- 60000 is the largest
 // clean round value safely under that ceiling.
 constexpr uint16_t kConversationUploadTimeoutMs = 60000;
-// Same 5000ms-default problem as above, hit by identifyKnownPerson() and
-// postCreateFromEncounter(): InsightFace inference on the server's CPU plus
-// the image upload itself can exceed the default even on a warm model, and
-// this is on the hot path fired repeatedly during a conversation.
-constexpr uint16_t kRecognitionTimeoutMs = 15000;
+// InsightFace inference runs on the server CPU. The first request can also
+// initialize the model, so allow enough time for upload plus cold inference.
+constexpr uint16_t kRecognitionTimeoutMs = 60000;
 
 // The mic driver's internal DMA buffer is shallow (see drainMicChunk
 // comment below). Any single loop() iteration blocking longer than this can
@@ -264,11 +262,14 @@ camera_fb_t *captureFrameViaReinit() {
 
 bool identifyKnownPerson(camera_fb_t *fb, String &outName, String &outRelationship, String &outLastSummary,
                           long &outKnownPersonId, long &outPatientId) {
+  String sourcePart = String("--") + kMultipartBoundary + "\r\n" +
+                      "Content-Disposition: form-data; name=\"source\"\r\n\r\n" +
+                      "specs_hardware\r\n";
   String bodyStart = String("--") + kMultipartBoundary + "\r\n" +
                       "Content-Disposition: form-data; name=\"image\"; filename=\"capture.jpg\"\r\n" +
                       "Content-Type: image/jpeg\r\n\r\n";
   String bodyEnd = String("\r\n--") + kMultipartBoundary + "--\r\n";
-  size_t totalLen = bodyStart.length() + fb->len + bodyEnd.length();
+  size_t totalLen = sourcePart.length() + bodyStart.length() + fb->len + bodyEnd.length();
 
   // The JPEG can be tens to ~150KB (UXGA); prefer PSRAM for this scratch
   // buffer so it doesn't compete with the small internal heap.
@@ -279,6 +280,8 @@ bool identifyKnownPerson(camera_fb_t *fb, String &outName, String &outRelationsh
   }
 
   size_t offset = 0;
+  memcpy(body + offset, sourcePart.c_str(), sourcePart.length());
+  offset += sourcePart.length();
   memcpy(body + offset, bodyStart.c_str(), bodyStart.length());
   offset += bodyStart.length();
   memcpy(body + offset, fb->buf, fb->len);
@@ -826,23 +829,10 @@ void exitRecording() {
       } else {
         Serial.printf("[UPLOAD] summarize/ failed (HTTP %d) for known_person_id=%ld\n", httpCode, lastIdentifyKnownPersonId);
       }
-    } else if (heldIdentifyImageBytes != nullptr && heldIdentifyImageLength > 0) {
-      String transcript, summary;
-      int transcribeCode = postConversationAudio(kTranscribeUrl, latestClosedRecordingFilename, lastIdentifyPatientId,
-                                                   0, false, transcript, summary);
-      if (transcribeCode >= 200 && transcribeCode < 300 && summary.length() > 0) {
-        bool createOk = postCreateFromEncounter(heldIdentifyImageBytes, heldIdentifyImageLength, summary, lastIdentifyPatientId);
-        Serial.printf("[UPLOAD] create-from-encounter %s\n", createOk ? "succeeded" : "failed");
-      } else {
-        Serial.printf("[UPLOAD] transcribe/ did not return a usable summary (HTTP %d) -- skipping create-from-encounter.\n", transcribeCode);
-      }
     } else {
-      // identifyAttempted but no image was ever captured this session (the
-      // deinit/reinit capture itself failed) -- nothing to send to
-      // create-from-encounter, and transcribing without a path to use the
-      // result isn't useful, so skip both calls rather than let
-      // create-from-encounter 400 on a missing "files" field.
-      Serial.println("[UPLOAD] Identify attempted but no image was captured this session -- skipping transcribe/create-from-encounter.");
+      // Unknown hardware detections are discarded. The hardware only stores
+      // conversations for people already identified as known.
+      Serial.println("[UPLOAD] identify did not match a known person -- discarding recording and face capture.");
     }
   }
 

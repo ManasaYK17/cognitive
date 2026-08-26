@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
@@ -42,7 +43,7 @@ class AuthService extends ChangeNotifier {
   final ApiClient _client = ApiClient();
 
   AuthService() {
-    if (!kIsWeb) {
+    if (!kIsWeb && Firebase.apps.isNotEmpty) {
       // Whenever FCM rotates the device's token, re-register it for
       // whichever patient session is currently active.
       FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
