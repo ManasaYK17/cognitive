@@ -830,9 +830,17 @@ void exitRecording() {
         Serial.printf("[UPLOAD] summarize/ failed (HTTP %d) for known_person_id=%ld\n", httpCode, lastIdentifyKnownPersonId);
       }
     } else {
-      // Unknown hardware detections are discarded. The hardware only stores
-      // conversations for people already identified as known.
-      Serial.println("[UPLOAD] identify did not match a known person -- discarding recording and face capture.");
+      // Store unknown-person conversations under the patient's single shared
+      // "Unknown" identity, preserving the recording and summary metadata while
+      // preventing duplicate unknown identities from being created.
+      String unusedTranscript, unusedSummary;
+      int httpCode = postConversationAudio(kSummarizeUrl, latestClosedRecordingFilename, lastIdentifyPatientId,
+                                            lastIdentifyKnownPersonId, true, unusedTranscript, unusedSummary);
+      if (httpCode >= 200 && httpCode < 300) {
+        Serial.printf("[UPLOAD] summarize/ succeeded (HTTP %d) for shared Unknown identity id=%ld\n", httpCode, lastIdentifyKnownPersonId);
+      } else {
+        Serial.printf("[UPLOAD] summarize/ failed (HTTP %d) for shared Unknown identity id=%ld\n", httpCode, lastIdentifyKnownPersonId);
+      }
     }
   }
 

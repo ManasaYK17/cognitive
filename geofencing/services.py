@@ -102,6 +102,7 @@ def check_and_alert(patient, location_ping):
                 body=f'Location: {location_ping.latitude}, {location_ping.longitude}',
                 data={
                     'type': 'geofence_alert',
+                    'target_role': 'caregiver',
                     'patient_id': str(patient.id),
                     'patient_name': patient.name,
                     'latitude': str(location_ping.latitude),

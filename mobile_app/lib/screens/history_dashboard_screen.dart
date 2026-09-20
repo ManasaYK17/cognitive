@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/realtime_event.dart';
 
 class HistoryDashboardScreen extends StatefulWidget {
   final int? patientId;
@@ -25,11 +28,29 @@ class _HistoryDashboardScreenState extends State<HistoryDashboardScreen> {
   final _searchController = TextEditingController();
   List<dynamic> _events = [];
   bool _loading = true;
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  StreamSubscription<void>? _resumeSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadHistory();
+    _realtimeSubscription = NotificationService.events.listen((event) {
+      if (!mounted || event.patientId != widget.patientId || event.type != 'CONVERSATION_UPDATED') return;
+      setState(() => _events = [
+        {'event_type': 'conversation', 'patient_id': event.patientId, 'timestamp': event.data['timestamp'], 'summary': 'Conversation updated'},
+        ..._events,
+      ]);
+    });
+    _resumeSubscription = NotificationService.resumeEvents.listen((_) => _loadHistory());
+  }
+
+  @override
+  void dispose() {
+    _realtimeSubscription?.cancel();
+    _resumeSubscription?.cancel();
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadHistory([String? search]) async {

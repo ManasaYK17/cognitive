@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../services/app_language.dart';
 import '../services/auth_service.dart';
 import '../services/recognition_service.dart';
 import 'caregiver_dashboard_screen.dart';
@@ -19,6 +20,8 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   bool _scanning = false;
   String _statusMessage = 'Checking who\'s here...';
 
+  String get _statusTextChecking => Provider.of<AppLanguage>(context, listen: false).translate('checking_whos_here');
+
   @override
   void initState() {
     super.initState();
@@ -26,30 +29,30 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   }
 
   Future<void> _startScan() async {
+    final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     setState(() {
       _scanning = true;
-      _statusMessage = 'Scanning for a known patient...';
+      _statusMessage = appLanguage.translate('scanning_known_patient');
     });
 
     final authService = Provider.of<AuthService>(context, listen: false);
 
     final recognitionService = Provider.of<RecognitionService>(context, listen: false);
 
-    // Attempt up to 3 captures (first with longer timeout, retries shorter)
+    // FaceScanCamera already waits for one usable face frame. A failed
+    // match is an unknown person, so retrying the same person adds delay.
     Map<String, dynamic>? result;
     bool matched = false;
-    for (int attempt = 0; attempt < 3; attempt++) {
-      final timeout = attempt == 0 ? 18 : 8;
-      final captureResult = await Navigator.of(context).push<FaceScanCaptureResult>(
-        MaterialPageRoute(builder: (_) => FaceScanCamera(timeoutSeconds: timeout)),
-      );
+    final captureResult = await Navigator.of(context).push<FaceScanCaptureResult>(
+      MaterialPageRoute(builder: (_) => const FaceScanCamera(timeoutSeconds: 18)),
+    );
 
       if (!mounted) return;
 
       if (captureResult == null || captureResult.cancelled || captureResult.image == null) {
         setState(() {
           _scanning = false;
-          _statusMessage = captureResult?.message ?? 'No face detected';
+          _statusMessage = captureResult?.message ?? appLanguage.translate('no_face_detected');
         });
         await Future.delayed(const Duration(milliseconds: 700));
         if (!mounted) return;
@@ -62,24 +65,16 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
       }
 
       final bytes = await captureResult.image!.readAsBytes();
-      debugPrint('[face_scan_screen] attempt=$attempt captured image bytes=${bytes.length} name=${captureResult.image!.name}');
+      debugPrint('[face_scan_screen] captured image bytes=${bytes.length} name=${captureResult.image!.name}');
       result = await recognitionService.attemptPatientRecognitionFromBytes(bytes, captureResult.image!.name, 'phone_auto_capture');
-      debugPrint('[face_scan_screen] recognition result (attempt $attempt): $result');
+      debugPrint('[face_scan_screen] recognition result: $result');
 
       if (!mounted) return;
 
       if (result != null && result['match'] == true && recognitionService.sessionToken != null) {
         matched = true;
-        break;
       }
 
-      if (attempt < 2) {
-        setState(() {
-          _statusMessage = 'No match — retrying scan...';
-        });
-        await Future.delayed(const Duration(milliseconds: 400));
-      }
-    }
 
     if (matched && recognitionService.sessionToken != null) {
       authService.setPatientSessionToken(recognitionService.sessionToken!);
@@ -91,7 +86,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
     setState(() {
       _scanning = false;
-      _statusMessage = 'No matching patient found';
+      _statusMessage = appLanguage.translate('no_matching_patient_found');
     });
     await Future.delayed(const Duration(milliseconds: 700));
     if (!mounted) return;

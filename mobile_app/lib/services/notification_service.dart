@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -11,6 +12,7 @@ import '../screens/patient_recognition_result_screen.dart';
 import 'auth_service.dart';
 import 'recognition_service.dart';
 import 'api_client.dart';
+import 'realtime_event.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
@@ -18,6 +20,15 @@ class NotificationService {
   /// Lets this static service navigate and read Provider state without a
   /// BuildContext of its own. Assigned to MaterialApp(navigatorKey: ...).
   static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+  static final StreamController<RealtimeEvent> _eventController = StreamController<RealtimeEvent>.broadcast();
+  static final StreamController<void> _resumeController = StreamController<void>.broadcast();
+  static final Set<String> _receivedEventIds = <String>{};
+  static Stream<RealtimeEvent> get events => _eventController.stream;
+  static Stream<void> get resumeEvents => _resumeController.stream;
+  static void notifyResumed() {
+    debugPrint('REALTIME_RECONNECT syncing REST-backed screens');
+    _resumeController.add(null);
+  }
 
   static const _pendingKnownPersonIdKey = 'pending_known_person_id';
   static const _pendingKnownPersonNameKey = 'pending_known_person_name';
@@ -29,6 +40,7 @@ class NotificationService {
   static const _pendingGeofencePatientNameKey = 'pending_geofence_patient_name';
   static const _pendingGeofenceLatKey = 'pending_geofence_lat';
   static const _pendingGeofenceLngKey = 'pending_geofence_lng';
+  static const _pendingRealtimeEventsKey = 'pending_realtime_events';
 
   static Future<bool> openKnownPersonMatch(
     Map<String, dynamic> data, {
@@ -82,7 +94,7 @@ class NotificationService {
         if (payload == null || payload.isEmpty) return;
         try {
           final data = json.decode(payload) as Map<String, dynamic>;
-          if (data['type'] == 'geofence_alert') {
+          if (data['type'] == 'geofence_alert' && data['target_role'] != 'patient') {
             await _handleGeofenceAlertTap(data);
           }
         } catch (_) {}
@@ -90,7 +102,7 @@ class NotificationService {
     );
 
     FirebaseMessaging.onMessage.listen((message) {
-      if (message.notification != null) {
+      if (message.notification != null && message.data['type'] != 'LOCATION_UPDATED' && message.data['type'] != 'geofence_alert') {
         _showNotification(
           message.notification!.title,
           message.notification!.body,
@@ -98,10 +110,12 @@ class NotificationService {
         );
       }
       _handleForegroundKnownPersonPush(message.data);
+      _publishRealtimeEvent(message.data);
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
       openKnownPersonMatch(message.data);
+      _publishRealtimeEvent(message.data);
     });
 
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
@@ -110,6 +124,40 @@ class NotificationService {
     }
 
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+  }
+
+  static Future<void> _persistRealtimeEvent(Map<String, dynamic> data) async {
+    final event = RealtimeEvent.fromMap(data);
+    if (event.id.isEmpty || event.type.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final pending = prefs.getStringList(_pendingRealtimeEventsKey) ?? <String>[];
+    if (!pending.any((item) => item.contains('"event_id":"${event.id}"'))) {
+      pending.add(json.encode(data));
+      await prefs.setStringList(_pendingRealtimeEventsKey, pending.length > 100 ? pending.sublist(pending.length - 100) : pending);
+    }
+  }
+
+  static Future<void> consumePendingRealtimeEvents() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pending = prefs.getStringList(_pendingRealtimeEventsKey) ?? <String>[];
+    if (pending.isEmpty) return;
+    for (final encoded in pending) {
+      try { _publishRealtimeEvent(json.decode(encoded) as Map<String, dynamic>); } catch (_) {}
+    }
+    await prefs.remove(_pendingRealtimeEventsKey);
+  }
+
+  static void _publishRealtimeEvent(Map<String, dynamic> data) {
+    final event = RealtimeEvent.fromMap(data);
+    if (event.id.isEmpty || event.type.isEmpty || _receivedEventIds.contains(event.id)) return;
+    final context = navigatorKey.currentContext;
+    final auth = context == null ? null : Provider.of<AuthService>(context, listen: false);
+    final activeRole = auth?.patientSessionToken != null ? 'patient' : auth?.accessToken != null ? 'caregiver' : '';
+    if (activeRole.isEmpty || event.targetRole != activeRole) return;
+    _receivedEventIds.add(event.id);
+    if (_receivedEventIds.length > 500) _receivedEventIds.remove(_receivedEventIds.first);
+    debugPrint('REALTIME_EVENT_RECEIVED event_id=${event.id} type=${event.type} patient_id=${event.patientId} target_role=$activeRole');
+    _eventController.add(event);
   }
 
   static Future<void> _handleForegroundKnownPersonPush(Map<String, dynamic> data) async {
@@ -209,6 +257,7 @@ class NotificationService {
   @pragma('vm:entry-point')
   static Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     await Firebase.initializeApp();
+    await _persistRealtimeEvent(message.data);
     if (message.notification != null) {
       await _showNotification(
         message.notification!.title,
@@ -248,8 +297,8 @@ class NotificationService {
     final context = navigatorKey.currentContext;
     if (context == null) return false;
 
-    final accessToken = Provider.of<AuthService>(context, listen: false).accessToken;
-    if (accessToken == null) return false;
+    final auth = Provider.of<AuthService>(context, listen: false);
+    if (auth.accessToken == null || auth.patientSessionToken != null) return false;
 
     navigatorKey.currentState?.push(
       MaterialPageRoute(

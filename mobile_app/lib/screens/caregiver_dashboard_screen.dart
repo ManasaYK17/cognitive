@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +13,8 @@ import 'patient_location_screen.dart';
 import 'face_scan_screen.dart';
 import 'reminders_screen.dart';
 import 'improvements_screen.dart';
+import '../services/notification_service.dart';
+import '../services/realtime_event.dart';
 
 class CaregiverDashboardScreen extends StatefulWidget {
   const CaregiverDashboardScreen({super.key});
@@ -26,11 +29,33 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
   bool _sidebarExpanded = false;
   Map<String, dynamic>? _patient;
   Map<String, dynamic>? _summary;
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  StreamSubscription<void>? _resumeSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadPatient();
+    _realtimeSubscription = NotificationService.events.listen((event) {
+      if (!mounted || event.patientId == null || _patient?['id'] != event.patientId) return;
+      if (event.type == 'CONVERSATION_UPDATED') {
+        final summary = Map<String, dynamic>.from(_summary ?? <String, dynamic>{});
+        summary['conversations_saved'] = (summary['conversations_saved'] as num? ?? 0) + 1;
+        setState(() => _summary = summary);
+      } else if (event.type == 'PATIENT_UPDATED') {
+        setState(() {
+          _patient = {...?_patient, if (event.data['name'] != null) 'name': event.data['name'], if (event.data['age'] != null) 'age': int.tryParse(event.data['age'].toString()), if (event.data['medical_notes'] != null) 'medical_notes': event.data['medical_notes']};
+        });
+      }
+    });
+    _resumeSubscription = NotificationService.resumeEvents.listen((_) => _loadPatient());
+  }
+
+  @override
+  void dispose() {
+    _realtimeSubscription?.cancel();
+    _resumeSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadPatient() async {
@@ -635,8 +660,14 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                   children: [
                     Row(
                       children: [
-                        const Text('Safe zone status', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
-                        const Spacer(),
+                        const Flexible(
+                          child: Text(
+                            'Safe zone status',
+                            style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
@@ -654,6 +685,9 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
                     Text(
                       '${_formatDistance(safeZone['distance_meters'] as double?)} from $safeZoneName · last checked ${_formatRelativeTime(safeZone['last_checked_at'] as String?)}',
                       style: const TextStyle(color: Colors.white60, fontSize: 13),
+                      softWrap: true,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),

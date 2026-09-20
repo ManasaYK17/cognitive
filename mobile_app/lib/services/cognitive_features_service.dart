@@ -22,6 +22,11 @@ class CognitiveFeaturesService {
     return json.decode(response.body) as Map<String, dynamic>;
   }
 
+  Future<void> deleteReminder(String token, int id) async {
+    final response = await _api.delete('/cognitive/reminders/$id/', token: token);
+    if (response.statusCode != 204) throw StateError('Unable to delete reminder.');
+  }
+
   Future<void> saveGameResult(String token, Map<String, dynamic> data) async {
     final response = await _api.post('/cognitive/games/', token: token, body: data);
     if (response.statusCode != 201) throw StateError('Score could not be saved.');

@@ -90,6 +90,9 @@ class LocationPingView(views.APIView):
         serializer.is_valid(raise_exception=True)
         location_ping = serializer.save(patient=patient)
 
+        from cognitive_features.events import LOCATION_UPDATED, publish_patient_event
+        publish_patient_event(patient, LOCATION_UPDATED, 'caregiver', location_ping.id, {'latitude': location_ping.latitude, 'longitude': location_ping.longitude})
+
         check_and_alert(patient, location_ping)
 
         safe_zone = getattr(patient, 'safe_zone', None)

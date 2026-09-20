@@ -7,15 +7,19 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cognitive_assist_app/services/api_client.dart';
+import 'package:cognitive_assist_app/services/app_language.dart';
 import 'package:cognitive_assist_app/services/auth_service.dart';
 import 'package:cognitive_assist_app/services/location_service.dart';
 import 'package:cognitive_assist_app/main.dart';
 
 void main() {
   testWidgets('App shows initial screen', (WidgetTester tester) async {
+    final appLanguage = AppLanguage();
+    await appLanguage.load();
     await tester.pumpWidget(CognitiveAssistApp(
       authService: AuthService(),
       locationService: LocationService(),
+      appLanguage: appLanguage,
     ));
     expect(find.text('Checking who\'s here...'), findsOneWidget);
   });

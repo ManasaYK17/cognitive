@@ -29,7 +29,6 @@ class ApiClient {
     if (_unauthorizedExemptPaths.contains(path)) return;
     onUnauthorized?.call();
   }
-
   static List<String> getCandidateBaseUrls({
     String apiHost = const String.fromEnvironment(
       'API_HOST',
@@ -145,6 +144,30 @@ class ApiClient {
       },
       path: path,
       method: 'PUT',
+    );
+    _reportIfUnauthorized(path, token, response);
+    return response;
+  }
+
+  Future<http.Response> delete(
+    String path, {
+    String? token,
+  }) async {
+    final headers = <String, String>{
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+
+    final response = await _sendWithFallback(
+      (String baseUri) async {
+        return http
+            .delete(
+              Uri.parse('$baseUri$path'),
+              headers: headers,
+            )
+            .timeout(timeoutDuration);
+      },
+      path: path,
+      method: 'DELETE',
     );
     _reportIfUnauthorized(path, token, response);
     return response;

@@ -3,10 +3,19 @@ from django.utils import timezone
 from rest_framework import permissions, status, views
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from patients.auth import resolve_patient_from_token
 from patients.models import Patient
 from .models import GameResult, Reminder
 from .serializers import GameResultCreateSerializer, GameResultSerializer, ReminderSerializer
+from .events import (
+    GAME_SCORE_UPDATED,
+    REMINDER_COMPLETED,
+    REMINDER_CREATED,
+    REMINDER_MISSED,
+    REMINDER_TRIGGERED,
+    publish_patient_event,
+)
 
 
 def patient_from_session(request):
@@ -16,7 +25,12 @@ def patient_from_session(request):
 
 
 def caregiver_from_request(request):
-    result = JWTAuthentication().authenticate(request)
+    if getattr(request.user, 'is_authenticated', False):
+        return request.user
+    try:
+        result = JWTAuthentication().authenticate(request)
+    except AuthenticationFailed:
+        return None
     return result[0] if result else None
 
 
@@ -42,6 +56,13 @@ class GameResultListCreateView(views.APIView):
         serializer = GameResultCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         result = serializer.save(patient=patient)
+        publish_patient_event(patient, GAME_SCORE_UPDATED, 'caregiver', result.id, {
+            'game_name': result.game_name,
+            'score': result.score,
+            'correct_answers': result.correct_answers,
+            'total_questions': result.total_questions,
+            'played_at': result.played_at.isoformat(),
+        })
         return Response(GameResultSerializer(result).data, status=status.HTTP_201_CREATED)
 
 
@@ -59,6 +80,14 @@ class ReminderListCreateView(views.APIView):
             now = timezone.now()
             due = reminders.filter(status=Reminder.PENDING, scheduled_for__lte=now)
             due.update(status=Reminder.TRIGGERED, triggered_at=now)
+            for reminder in due:
+                publish_patient_event(patient, REMINDER_TRIGGERED, 'patient', reminder.id, {
+                    'reminder_type': reminder.reminder_type,
+                    'medicine_name': reminder.medicine_name,
+                    'message': reminder.message,
+                    'scheduled_for': reminder.scheduled_for.isoformat(),
+                    'status': reminder.status,
+                })
             reminders = Reminder.objects.filter(patient=patient)
         return Response(serialize_reminders(reminders))
 
@@ -75,7 +104,25 @@ class ReminderListCreateView(views.APIView):
             reminder = serializer.save(patient=patient, caregiver=caregiver)
         except IntegrityError:
             return Response({'detail': 'This reminder already exists.'}, status=status.HTTP_409_CONFLICT)
+        publish_patient_event(patient, REMINDER_CREATED, 'patient', reminder.id, {'reminder_type': reminder.reminder_type, 'medicine_name': reminder.medicine_name, 'message': reminder.message, 'scheduled_for': reminder.scheduled_for.isoformat()})
         return Response(ReminderSerializer(reminder).data, status=status.HTTP_201_CREATED)
+
+
+class ReminderDetailView(views.APIView):
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    def delete(self, request, pk, *args, **kwargs):
+        caregiver = caregiver_from_request(request)
+        if caregiver is None:
+            return Response({'detail': 'Caregiver authentication is required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        reminder = Reminder.objects.filter(pk=pk, caregiver=caregiver).first()
+        if reminder is None:
+            return Response({'detail': 'Reminder not found or unauthorized.'}, status=status.HTTP_404_NOT_FOUND)
+
+        reminder.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ReminderStatusView(views.APIView):
@@ -107,4 +154,9 @@ class ReminderStatusView(views.APIView):
         else:
             reminder.missed_at = now
         reminder.save(update_fields=['status', 'completed_at', 'missed_at'])
+        publish_patient_event(reminder.patient, REMINDER_COMPLETED if requested == Reminder.COMPLETED else REMINDER_MISSED, 'caregiver', reminder.id, {
+            'status': requested,
+            'completed_at': reminder.completed_at.isoformat() if reminder.completed_at else None,
+            'missed_at': reminder.missed_at.isoformat() if reminder.missed_at else None,
+        })
         return Response(ReminderSerializer(reminder).data)

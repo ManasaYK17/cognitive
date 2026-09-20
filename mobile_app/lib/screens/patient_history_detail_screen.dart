@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 
@@ -22,11 +23,19 @@ class _PatientHistoryDetailScreenState extends State<PatientHistoryDetailScreen>
   final ApiClient _api = ApiClient();
   bool _loading = true;
   List<dynamic> _history = [];
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _loadHistory();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) => _loadHistory());
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadHistory() async {

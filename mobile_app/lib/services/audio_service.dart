@@ -52,7 +52,7 @@ class AudioService extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> stopRecordingAndSend(int patientId, int knownPersonId, String sessionToken) async {
+  Future<bool> stopRecordingAndSend(int patientId, int knownPersonId, String sessionToken, {String language = 'English'}) async {
     if (kIsWeb) {
       lastSummaryMessage = 'Audio recording not available on web.';
       notifyListeners();
@@ -78,6 +78,7 @@ class AudioService extends ChangeNotifier {
         fields: {
           'known_person_id': knownPersonId.toString(),
           'patient_id': patientId.toString(),
+          'language': language,
         },
         files: [await http.MultipartFile.fromPath('audio', path)],
         timeout: _uploadTimeout,

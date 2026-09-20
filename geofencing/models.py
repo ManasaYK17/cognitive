@@ -25,7 +25,7 @@ class LocationPing(models.Model):
     latitude = models.FloatField()
     longitude = models.FloatField()
     timestamp = models.DateTimeField(auto_now_add=True)
-    distance_from_center_meters = models.FloatField()
+    distance_from_center_meters = models.FloatField(null=True, blank=True)
 
     def save(self, *args, **kwargs):
         safe_zone = getattr(self.patient, 'safe_zone', None)

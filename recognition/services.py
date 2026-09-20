@@ -1,9 +1,13 @@
 import io
+import logging
+import time
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
+
+logger = logging.getLogger(__name__)
 
 try:
     import cv2
@@ -271,6 +275,7 @@ def _yunet_detect(img) -> list:
 
 
 def detect_face(image) -> tuple:
+    started_at = time.perf_counter()
     if _image_variance(image) < 2.0:
         raise NoFaceDetectedError('No face detected in the image.')
 
@@ -287,6 +292,35 @@ def detect_face(image) -> tuple:
     if img is not None:
         insightface_faces = _insightface_get_faces(img)
         if len(insightface_faces) > 1:
+            h, w = img.shape[:2]
+            candidates = []
+            for face in insightface_faces:
+                bbox = getattr(face, 'bbox', None)
+                if bbox is None:
+                    continue
+                try:
+                    bbox_array = [float(v) for v in bbox[:4]]
+                except Exception:
+                    continue
+                if len(bbox_array) != 4:
+                    continue
+                x1, y1, x2, y2 = bbox_array
+                x1, y1 = max(0, int(round(x1))), max(0, int(round(y1)))
+                x2, y2 = min(w, int(round(x2))), min(h, int(round(y2)))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                area = (x2 - x1) * (y2 - y1)
+                if area > 0:
+                    candidates.append((area, (x1, y1, x2, y2)))
+            if candidates:
+                largest_area, largest_box = max(candidates, key=lambda item: item[0])
+                second_largest_area = max((area for area, _ in candidates if area != largest_area), default=0)
+                if second_largest_area <= max(0.25 * largest_area, 1600):
+                    x1, y1, x2, y2 = largest_box
+                    if (x2 - x1) * (y2 - y1) < 1600:
+                        raise LowQualityImageError('Image is too blurry or low quality for face recognition.')
+                    logger.info('recognition_timing detect_face backend=insightface elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+                    return (x1, y1, x2, y2)
             raise MultipleFacesDetectedError('Multiple faces detected. Please upload a clearer image.')
         if len(insightface_faces) == 1:
             h, w = img.shape[:2]
@@ -295,7 +329,9 @@ def detect_face(image) -> tuple:
             x2, y2 = min(w, int(round(x2))), min(h, int(round(y2)))
             if (x2 - x1) * (y2 - y1) < 1600:
                 raise LowQualityImageError('Image is too blurry or low quality for face recognition.')
-            return (x1, y1, x2, y2)
+            location = (x1, y1, x2, y2)
+            logger.info('recognition_timing detect_face backend=insightface elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+            return location
 
         # InsightFace found nothing (e.g. not installed) -- try YuNet.
         boxes = _yunet_detect(img)
@@ -305,6 +341,7 @@ def detect_face(image) -> tuple:
             x1, y1, x2, y2 = boxes[0]
             if (x2 - x1) * (y2 - y1) < 1600:
                 raise LowQualityImageError('Image is too blurry or low quality for face recognition.')
+            logger.info('recognition_timing detect_face backend=yunet elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
             return boxes[0]
 
         # Neither found anything -- try the older Haar
@@ -321,7 +358,9 @@ def detect_face(image) -> tuple:
                         x, y, w, h = faces[0]
                         if w * h < 1600:
                             raise LowQualityImageError('Image is too blurry or low quality for face recognition.')
-                        return (x, y, x + w, y + h)
+                        location = (x, y, x + w, y + h)
+                        logger.info('recognition_timing detect_face backend=haar elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+                        return location
             except (MultipleFacesDetectedError, LowQualityImageError):
                 raise
             except (cv2.error, TypeError, ValueError, AttributeError):
@@ -329,7 +368,9 @@ def detect_face(image) -> tuple:
 
     # Last resort: crude flood-fill blob detector for when no cv2 detector
     # is available at all.
-    return _fallback_detect_face(image)
+    location = _fallback_detect_face(image)
+    logger.info('recognition_timing detect_face backend=fallback elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+    return location
 
 
 _MIN_FACE_BOX_AREA = 24 * 24
@@ -359,7 +400,9 @@ _UNIFORM_LBP_TABLE = _build_uniform_lbp_table()
 
 
 def _crop_to_face(img: Image.Image, face_location, padding_ratio: float = 0.2) -> Image.Image:
+    started_at = time.perf_counter()
     if not face_location or len(face_location) != 4:
+        logger.info('recognition_timing face_crop elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
         return img
     width, height = img.size
     left, top, right, bottom = face_location
@@ -377,8 +420,11 @@ def _crop_to_face(img: Image.Image, face_location, padding_ratio: float = 0.2) -
     right = min(width, right + pad_x)
     bottom = min(height, bottom + pad_y)
     if right <= left or bottom <= top:
+        logger.info('recognition_timing face_crop elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
         return img
-    return img.crop((left, top, right, bottom))
+    cropped = img.crop((left, top, right, bottom))
+    logger.info('recognition_timing face_crop elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+    return cropped
 
 
 def _to_css_location(face_location, image_size) -> tuple:
@@ -500,6 +546,7 @@ def _enhance_low_light(img: Image.Image) -> Image.Image:
 
 
 def generate_encoding(image, face_location) -> list:
+    started_at = time.perf_counter()
     img = _enhance_low_light(_load_pil_image(image))
     face_img = _crop_to_face(img, face_location)
 
@@ -514,7 +561,9 @@ def generate_encoding(image, face_location) -> list:
                 # largest face is the same "main subject" heuristic detect_face()
                 # effectively applies via its own single-face requirement.
                 faces.sort(key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]), reverse=True)
-                return faces[0].normed_embedding.tolist()
+                encoding = faces[0].normed_embedding.tolist()
+                logger.info('recognition_timing generate_encoding backend=insightface elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+                return encoding
         except Exception:
             pass
 
@@ -524,8 +573,12 @@ def generate_encoding(image, face_location) -> list:
             css_location = _to_css_location(face_location, img.size)
             face_landmarks = face_recognition.face_encodings(img_np, [css_location])
             if face_landmarks:
-                return face_landmarks[0].tolist()
+                encoding = face_landmarks[0].tolist()
+                logger.info('recognition_timing generate_encoding backend=face_recognition elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+                return encoding
         except Exception:
             pass
 
-    return _face_descriptor(face_img)
+    encoding = _face_descriptor(face_img)
+    logger.info('recognition_timing generate_encoding backend=lbp elapsed_ms=%.1f', (time.perf_counter() - started_at) * 1000)
+    return encoding

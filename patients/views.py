@@ -88,6 +88,12 @@ class CaregiverPatientView(views.APIView):
         serializer = PatientSerializer(patient, data=request.data, partial=False)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        from cognitive_features.events import PATIENT_UPDATED, publish_patient_event
+        publish_patient_event(patient, PATIENT_UPDATED, 'patient', patient.id, {
+            'name': patient.name,
+            'age': patient.age,
+            'medical_notes': patient.medical_notes,
+        })
         return Response(serializer.data)
 
     def delete(self, request, *args, **kwargs):

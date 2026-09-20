@@ -63,6 +63,7 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
     _registerPatientDeviceToken();
     NotificationService.consumePendingKnownPersonPush();
+    NotificationService.consumePendingRealtimeEvents();
   }
 
   // Exits patient kiosk mode without touching the caregiver's own

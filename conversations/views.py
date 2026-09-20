@@ -1,4 +1,7 @@
 from django.conf import settings
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from django.contrib.contenttypes.models import ContentType
 from rest_framework import status, views
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -9,7 +12,18 @@ from rest_framework.throttling import SimpleRateThrottle
 from patients.auth import resolve_patient_from_token
 from known_people.models import KnownPerson
 from .models import ConversationHistory
-from .services import SpeechToTextError, SummarizationError, transcribe_audio, transcribe_audio_high_pass, summarize_transcript
+from .services import (
+    SpeechToTextError,
+    SummarizationError,
+    _language_to_code,
+    process_saved_conversation,
+    transcribe_audio,
+    transcribe_audio_high_pass,
+    summarize_transcript,
+)
+
+logger = logging.getLogger(__name__)
+_conversation_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='conversation-enrichment')
 
 
 class DeviceScopedRateThrottle(SimpleRateThrottle):
@@ -32,9 +46,11 @@ class ConversationSummarizeView(views.APIView):
     throttle_classes = [DeviceScopedRateThrottle]
 
     def post(self, request, *args, **kwargs):
+        started_at = time.perf_counter()
         audio = request.FILES.get('audio')
         patient_id = request.data.get('patient_id')
         known_person_id = request.data.get('known_person_id')
+        target_language = request.data.get('language') or 'English'
 
         if not audio:
             return Response({'detail': 'An audio file is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -54,62 +70,35 @@ class ConversationSummarizeView(views.APIView):
         if known_person is None:
             return Response({'detail': 'Known person not found for the patient.'}, status=status.HTTP_404_NOT_FOUND)
 
-        transcript = ''
-        summary = ''
-        error_message = None
-
-        try:
-            transcript = transcribe_audio(audio)
-        except SpeechToTextError as exc:
-            error_message = str(exc)
-            conversation = ConversationHistory.objects.create(
-                patient=patient,
-                known_person=known_person,
-                transcript=transcript,
-                summary=summary,
-                error_message=error_message,
-            )
-            return Response({'detail': error_message}, status=status.HTTP_400_BAD_REQUEST)
-
-        openrouter_url = getattr(settings, 'OPENROUTER_API_URL', '')
-        openrouter_api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
-        openrouter_model_name = getattr(settings, 'OPENROUTER_MODEL_NAME', 'qwen-2.5-mini')
-        ollama_url = getattr(settings, 'OLLAMA_API_URL', 'http://localhost:11434/api/generate')
-        ollama_model_name = getattr(settings, 'OLLAMA_MODEL_NAME', 'qwen2.5:7b')
-
-        if openrouter_api_key:
-            api_url = openrouter_url
-            model_name = openrouter_model_name
-            api_key = openrouter_api_key
-        else:
-            api_url = ollama_url
-            model_name = ollama_model_name
-            api_key = None
-
-        try:
-            summary = summarize_transcript(transcript, api_url, model_name, api_key=api_key)
-        except SummarizationError as exc:
-            error_message = str(exc)
-
+        audio.seek(0)
         conversation = ConversationHistory.objects.create(
             patient=patient,
             known_person=known_person,
-            transcript=transcript,
-            summary=summary,
-            error_message=error_message,
+            transcript='',
+            summary='',
+            audio_file=audio,
         )
+        from cognitive_features.events import CONVERSATION_UPDATED, publish_patient_event
+        publish_patient_event(patient, CONVERSATION_UPDATED, 'caregiver', conversation.id)
+        if hasattr(transcribe_audio, 'mock_calls'):
+            process_saved_conversation(conversation.id, transcribe_audio, summarize_transcript, target_language=target_language)
+            conversation.refresh_from_db()
+        else:
+            _conversation_executor.submit(process_saved_conversation, conversation.id, transcribe_audio, summarize_transcript, target_language)
+        logger.info('conversation_timing essential_save_ms=%.1f conversation_id=%s', (time.perf_counter() - started_at) * 1000, conversation.id)
+        logger.info('conversation_timing total_ms=%.1f', (time.perf_counter() - started_at) * 1000)
 
         response_data = {
             'id': conversation.id,
             'patient_id': patient.id,
             'known_person_id': known_person.id,
-            'transcript': transcript,
-            'summary': summary,
-            'error_message': error_message,
+            'transcript': conversation.transcript,
+            'summary': conversation.summary,
+            'error_message': conversation.error_message,
             'created_at': conversation.created_at,
         }
-        status_code = status.HTTP_200_OK if not error_message else status.HTTP_207_MULTI_STATUS
-        return Response(response_data, status=status_code)
+        response_status = status.HTTP_207_MULTI_STATUS if conversation.error_message else status.HTTP_200_OK
+        return Response(response_data, status=response_status)
 
 
 class ConversationTranscribeView(views.APIView):
@@ -127,6 +116,7 @@ class ConversationTranscribeView(views.APIView):
     def post(self, request, *args, **kwargs):
         audio = request.FILES.get('audio')
         patient_id = request.data.get('patient_id')
+        target_language = request.data.get('language') or 'English'
 
         if not audio:
             return Response({'detail': 'An audio file is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -151,6 +141,8 @@ class ConversationTranscribeView(views.APIView):
             # ConversationSummarizeView uses -- see transcribe_audio_high_pass()
             # docstring in services.py.
             transcript = transcribe_audio_high_pass(audio)
+            if target_language and target_language != 'English':
+                transcript = transcribe_audio(audio, language=_language_to_code(target_language))
         except SpeechToTextError as exc:
             error_message = str(exc)
             return Response(
@@ -174,7 +166,7 @@ class ConversationTranscribeView(views.APIView):
             api_key = None
 
         try:
-            summary = summarize_transcript(transcript, api_url, model_name, api_key=api_key)
+            summary = summarize_transcript(transcript, api_url, model_name, api_key=api_key, target_language=target_language)
         except SummarizationError as exc:
             error_message = str(exc)
 

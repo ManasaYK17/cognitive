@@ -64,6 +64,42 @@ class RecognitionServiceTests(TestCase):
         with self.assertRaises(MultipleFacesDetectedError):
             detect_face(uploaded)
 
+    def test_detect_face_ignores_tiny_secondary_detection(self):
+        image = self._make_image()
+
+        class FakeFace:
+            def __init__(self, bbox):
+                self.bbox = bbox
+
+        with patch('recognition.services._image_variance', return_value=100.0), \
+             patch('recognition.services.cv2.imdecode', return_value=np.zeros((240, 240, 3), dtype=np.uint8)), \
+             patch('recognition.services._insightface_get_faces', return_value=[
+                 FakeFace((10, 10, 150, 150)),
+                 FakeFace((160, 160, 170, 170)),
+             ]), \
+             patch('recognition.services._yunet_detect', return_value=[]):
+            location = detect_face(image)
+
+        self.assertEqual(location, (10, 10, 150, 150))
+
+    def test_detect_face_handles_numpy_bbox_arrays_from_insightface(self):
+        image = self._make_image()
+
+        class FakeFace:
+            def __init__(self, bbox):
+                self.bbox = np.array(bbox, dtype=float)
+
+        with patch('recognition.services._image_variance', return_value=100.0), \
+             patch('recognition.services.cv2.imdecode', return_value=np.zeros((240, 240, 3), dtype=np.uint8)), \
+             patch('recognition.services._insightface_get_faces', return_value=[
+                 FakeFace((10, 10, 150, 150)),
+                 FakeFace((160, 160, 170, 170)),
+             ]), \
+             patch('recognition.services._yunet_detect', return_value=[]):
+            location = detect_face(image)
+
+        self.assertEqual(location, (10, 10, 150, 150))
+
     def test_signal_creates_encoding_for_face_image(self):
         image = self._make_image()
         face_image = FaceImage.objects.create(subject_type='patient', patient_subject=self.patient, image=image)
@@ -136,6 +172,73 @@ class RecognitionEndpointTests(APITestCase):
                 outcome='matched',
             ).exists(),
         )
+
+    def test_identify_patient_prefers_actual_patient_when_known_person_is_close_but_not_stronger(self):
+        similar_person = KnownPerson.objects.create(patient=self.patient, name='Close Relative')
+        FaceImage.objects.create(
+            subject_type='known_person',
+            image=self.patient_image,
+            object_id=similar_person.id,
+            content_type=ContentType.objects.get_for_model(similar_person),
+        )
+
+        response = self.client.post(
+            reverse('identify-patient'),
+            {'device_id': self.device_id, 'image': self._make_image()},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['patient_id'], self.patient.id)
+        self.assertIsNotNone(response.data['patient_session_token'])
+
+    @patch('recognition.views.compute_similarity', return_value=0.72)
+    def test_identify_patient_ignores_same_patient_known_person_when_deciding_patient_match(self, _mock_similarity):
+        similar_person = KnownPerson.objects.create(patient=self.patient, name='Close Relative')
+        FaceImage.objects.create(
+            subject_type='known_person',
+            image=self.patient_image,
+            object_id=similar_person.id,
+            content_type=ContentType.objects.get_for_model(similar_person),
+        )
+
+        response = self.client.post(
+            reverse('identify-patient'),
+            {'device_id': self.device_id, 'source': 'phone_auto_capture', 'image': self._make_image()},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['patient_id'], self.patient.id)
+        self.assertIsNotNone(response.data['patient_session_token'])
+
+    def test_identify_patient_does_not_confuse_known_people_from_other_patients(self):
+        other_caregiver = Caregiver.objects.create_user(
+            email='othercaregiver@example.com',
+            first_name='Other',
+            password='StrongPass123',
+        )
+        other_patient = Patient.objects.create(caregiver=other_caregiver, name='Other Patient', age=50, medical_notes='Other')
+        other_known = KnownPerson.objects.create(patient=other_patient, name='Lookalike Relative', relationship='Sibling')
+        FaceImage.objects.create(
+            subject_type='known_person',
+            image=self.patient_image,
+            object_id=other_known.id,
+            content_type=ContentType.objects.get_for_model(other_known),
+        )
+
+        response = self.client.post(
+            reverse('identify-patient'),
+            {'device_id': self.device_id, 'image': self._make_image()},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['patient_id'], self.patient.id)
+        self.assertIsNotNone(response.data['patient_session_token'])
 
     def test_issue_patient_session_token_returns_signed_token(self):
         response = self.client.post(
@@ -225,6 +328,96 @@ class RecognitionEndpointTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('detail', response.data)
+
+    @patch('recognition.views.compute_similarity', return_value=0.84)
+    def test_phone_auto_capture_accepts_realistic_same_person_similarity(self, _mock_similarity):
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['id'], self.known_person.id)
+
+    @patch('recognition.views.compute_similarity', return_value=0.6)
+    def test_phone_auto_capture_rejects_low_confidence_unknown_person(self, _mock_similarity):
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertIsNone(response.data['id'])
+
+    @patch('recognition.views.compute_similarity', return_value=0.6)
+    def test_phone_auto_capture_records_unknown_detection_event(self, _mock_similarity):
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertTrue(
+            RecognitionHistory.objects.filter(
+                patient=self.patient,
+                subject_type='known_person',
+                outcome='not_matched',
+            ).exists(),
+        )
+
+    @patch('recognition.views.compute_similarity', return_value=0.2)
+    def test_unknown_person_uses_single_shared_unknown_identity(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.assertEqual(token_response.status_code, status.HTTP_200_OK)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+
+        first = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'specs_hardware'},
+            format='multipart',
+        )
+        second = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(color=(10, 20, 30)), 'source': 'specs_hardware'},
+            format='multipart',
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertFalse(first.data['match'])
+        self.assertFalse(second.data['match'])
+        self.assertEqual(first.data['name'], 'Unknown')
+        self.assertEqual(second.data['name'], 'Unknown')
+        self.assertEqual(first.data['id'], second.data['id'])
+        self.assertEqual(KnownPerson.objects.filter(patient=self.patient, name='Unknown').count(), 1)
+
+    @patch('recognition.views.compute_similarity', return_value=0.84)
+    def test_phone_auto_capture_detects_known_person(self, _mock_similarity):
+        identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['id'], self.known_person.id)
 
     def test_phone_auto_capture_does_not_fallback_to_known_person_reference(self):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')

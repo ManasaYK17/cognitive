@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
+import '../services/app_language.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/recognition_service.dart';
 import '../services/cognitive_features_service.dart';
+import '../services/notification_service.dart';
 import '../theme/design_tokens.dart';
 import '../widgets/face_scan_camera.dart';
 import 'caregiver_dashboard_screen.dart';
@@ -16,6 +18,7 @@ import 'patient_history_screen.dart';
 import 'patient_recognition_result_screen.dart';
 import 'cognitive_games_screen.dart';
 import 'reminder_alarm_screen.dart';
+import '../services/realtime_event.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   final int patientId;
@@ -38,8 +41,13 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   bool _openingHardwareResult = false;
   bool _gameMode = false;
   Timer? _reminderTimer;
+  Timer? _usageReminderTimer;
   bool _openingReminder = false;
+  bool _usageReminderActive = false;
   final CognitiveFeaturesService _features = CognitiveFeaturesService();
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  StreamSubscription<void>? _resumeSubscription;
+  final Map<int, Timer> _scheduledReminderTimers = <int, Timer>{};
 
   @override
   void initState() {
@@ -65,14 +73,59 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prepareLocationReporting();
       _startRecognitionPolling();
+      _startUsageReminderLoop();
       _checkReminders();
       _reminderTimer = Timer.periodic(const Duration(seconds: 15), (_) => _checkReminders());
+      _realtimeSubscription = NotificationService.events.listen((event) {
+        if (!mounted || event.patientId != widget.patientId) return;
+        if (event.type == 'REMINDER_CREATED') {
+          _scheduleRealtimeReminder(event);
+        } else if (event.type == 'REMINDER_TRIGGERED') {
+          _openRealtimeReminder(event);
+        }
+      });
+      _resumeSubscription = NotificationService.resumeEvents.listen((_) => _checkReminders());
     });
+  }
+
+  void _scheduleRealtimeReminder(RealtimeEvent event) {
+    final reminderId = event.objectId;
+    final scheduledFor = DateTime.tryParse(event.data['scheduled_for']?.toString() ?? '')?.toLocal();
+    if (reminderId == null || scheduledFor == null) return;
+    _scheduledReminderTimers[reminderId]?.cancel();
+    final delay = scheduledFor.difference(DateTime.now());
+    if (delay <= Duration.zero) {
+      _openRealtimeReminder(event);
+      return;
+    }
+    _scheduledReminderTimers[reminderId] = Timer(delay, () {
+      _scheduledReminderTimers.remove(reminderId);
+      _openRealtimeReminder(event);
+    });
+  }
+
+  Future<void> _openRealtimeReminder(RealtimeEvent event) async {
+    if (_openingReminder || event.objectId == null) return;
+    _openingReminder = true;
+    try {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ReminderAlarmScreen(
+        reminder: {
+          'id': event.objectId,
+          'type': event.data['reminder_type'],
+          'medicine_name': event.data['medicine_name'],
+          'message': event.data['message'],
+          'scheduled_for': event.data['scheduled_for'],
+          'status': event.data['status'] ?? 'triggered',
+        },
+        sessionToken: widget.sessionToken,
+      )));
+    } finally {
+      _openingReminder = false;
+    }
   }
 
   void _startRecognitionPolling() {
     _recognitionPollTimer?.cancel();
-    _reminderTimer?.cancel();
     _recognitionPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
       if (!mounted) return;
       final response = await _api.get(
@@ -101,6 +154,33 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         _openingHardwareResult = false;
       }
     });
+  }
+
+  void _startUsageReminderLoop() {
+    _usageReminderTimer?.cancel();
+    _usageReminderTimer = Timer.periodic(const Duration(minutes: 20), (_) {
+      if (!mounted || _usageReminderActive || _openingReminder) return;
+      _usageReminderActive = true;
+      unawaited(_showUsageReminder());
+    });
+  }
+
+  Future<void> _showUsageReminder() async {
+    if (!mounted) return;
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ReminderAlarmScreen(
+            reminder: ReminderAlarmScreen.buildUsageReminder(),
+            sessionToken: widget.sessionToken,
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        _usageReminderActive = false;
+      }
+    }
   }
 
   Future<void> _checkReminders() async {
@@ -140,6 +220,14 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   @override
   void dispose() {
     _recognitionPollTimer?.cancel();
+    _reminderTimer?.cancel();
+    _usageReminderTimer?.cancel();
+    _realtimeSubscription?.cancel();
+    _resumeSubscription?.cancel();
+    for (final timer in _scheduledReminderTimers.values) {
+      timer.cancel();
+    }
+    _scheduledReminderTimers.clear();
     _flutterTts.stop();
     super.dispose();
   }
@@ -171,14 +259,15 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   Future<void> _confirmExitPatientMode() async {
+    final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Exit patient mode?'),
-        content: const Text('This closes the patient screen and returns to caregiver sign-in.'),
+        title: Text(appLanguage.translate('exit_patient_mode_question')),
+        content: Text(appLanguage.translate('exit_patient_mode_message')),
         actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Exit')),
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: Text(appLanguage.translate('cancel'))),
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: Text(appLanguage.translate('exit'))),
         ],
       ),
     );
@@ -206,9 +295,10 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   Future<void> _attemptRecognition() async {
+    final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     if (widget.sessionToken.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Patient has not been enrolled yet. Caregiver must save the patient profile first.')),
+        SnackBar(content: Text(appLanguage.translate('patient_not_enrolled'))),
       );
       return;
     }
@@ -220,35 +310,32 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     recognitionService.clearRecognizedPerson();
 
     Map<String, dynamic>? payload;
-    for (var attempt = 0; attempt < 3; attempt++) {
-      final result = await navigator.push<FaceScanCaptureResult>(
-        MaterialPageRoute(builder: (_) => const FaceScanCamera()),
-      );
-      if (!mounted) return;
-      if (result == null || result.cancelled || result.image == null) {
-        if (result?.message != null) {
-          messenger.showSnackBar(SnackBar(content: Text(result!.message!)));
-        }
-        setState(() => _scanning = false);
-        return;
+    final result = await navigator.push<FaceScanCaptureResult>(
+      MaterialPageRoute(builder: (_) => const FaceScanCamera()),
+    );
+    if (!mounted) return;
+    if (result == null || result.cancelled || result.image == null) {
+      if (result?.message != null) {
+        messenger.showSnackBar(SnackBar(content: Text(result!.message!)));
       }
-      final bytes = await result.image!.readAsBytes();
-      payload = await recognitionService.attemptRecognitionFromBytes(
-        bytes,
-        result.image!.name,
-        'phone_auto_capture',
-        sessionTokenOverride: widget.sessionToken,
-      );
-      if (payload?['match'] == true) break;
+      setState(() => _scanning = false);
+      return;
     }
+    final bytes = await result.image!.readAsBytes();
+    payload = await recognitionService.attemptRecognitionFromBytes(
+      bytes,
+      result.image!.name,
+      'phone_auto_capture',
+      sessionTokenOverride: widget.sessionToken,
+    );
     if (!mounted) return;
     setState(() => _scanning = false);
 
     if (payload == null || payload['match'] != true) {
-      const message = 'Unknown person detected';
+      final message = appLanguage.translate('unknown_person_detected');
       await _announceMessage(message);
       messenger.showSnackBar(
-        const SnackBar(content: Text('Unknown person detected. Please try again.')),
+        SnackBar(content: Text('$message. ${appLanguage.translate('try_again')}')),
       );
       return;
     }
@@ -279,10 +366,11 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   Widget _buildTimeline() {
+    final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     if (_recentMemories.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16.0),
-        child: Text('No recent memories yet.', style: TextStyle(color: Color.fromARGB(255, 200, 46, 46))),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16.0),
+        child: Text(appLanguage.translate('no_recent_memories_yet'), style: const TextStyle(color: Color.fromARGB(255, 200, 46, 46))),
       );
     }
 
@@ -301,6 +389,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   Widget _buildScanCard() {
+    final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     final recognitionService = Provider.of<RecognitionService>(context);
     final person = recognitionService.recognizedPerson;
     final isMatch = person != null && person['match'] == true;
@@ -338,7 +427,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         ),
         const SizedBox(height: 18),
         Text(
-          hasEnrollmentToken ? 'Scan using camera icon' : 'Ask caregiver to save patient profile first',
+          hasEnrollmentToken ? appLanguage.translate('scan_using_camera_icon') : appLanguage.translate('ask_caregiver_to_save_profile'),
           style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white),
           textAlign: TextAlign.center,
         ),
@@ -347,7 +436,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           const CircularProgressIndicator(color: DesignTokens.accent)
         else if (person != null)
           Text(
-            isMatch ? 'Recognized: $recognizedName' : 'Unknown person detected',
+            isMatch ? '${appLanguage.translate('recognized')}: $recognizedName' : appLanguage.translate('unknown_person_detected'),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(color: isMatch ? DesignTokens.success : Colors.orangeAccent),
           ),
       ],
@@ -356,13 +445,14 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final appLanguage = Provider.of<AppLanguage>(context);
     final recognitionService = Provider.of<RecognitionService>(context);
     final person = recognitionService.recognizedPerson;
     final statusText = widget.sessionToken.isEmpty
-        ? 'Patient not enrolled yet. Caregiver must save profile before scan.'
+        ? appLanguage.translate('patient_not_enrolled')
         : person != null
-            ? (person['match'] == true ? 'Recognized: ${person['name']}' : 'Unknown person detected')
-            : 'Ready to scan';
+            ? (person['match'] == true ? '${appLanguage.translate('recognized')}: ${person['name']}' : appLanguage.translate('unknown_person_detected'))
+            : appLanguage.translate('ready_to_scan');
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -371,9 +461,9 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         elevation: 0,
         automaticallyImplyLeading: false,
         leading: _gameMode ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _gameMode = false)) : null,
-        title: _gameMode ? const Text('Cognitive Games') : null,
+        title: _gameMode ? Text(appLanguage.translate('patient_mode')) : null,
         actions: [
-          Row(children: [const Text('Games', style: TextStyle(fontSize: 15)), Switch(value: _gameMode, onChanged: (value) => setState(() => _gameMode = value))]),
+          Row(children: [Text(appLanguage.translate('patient_mode'), style: const TextStyle(fontSize: 15)), Switch(value: _gameMode, onChanged: (value) => setState(() => _gameMode = value))]),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white70),
             tooltip: 'Exit to caregiver sign-in',
@@ -398,10 +488,10 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => PatientHistoryScreen(sessionToken: widget.sessionToken)));
                 },
                 style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(56), foregroundColor: Colors.white, side: const BorderSide(color: DesignTokens.accent)),
-                child: const Text('People I’ve talked to'),
+                child: Text(appLanguage.translate('people_i_ve_talked_to')),
               ),
               const SizedBox(height: 20),
-              Align(alignment: Alignment.centerLeft, child: Text('Recent memories', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white))),
+              Align(alignment: Alignment.centerLeft, child: Text(appLanguage.translate('recent_memories'), style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white))),
               const SizedBox(height: 12),
               if (_loadingMemories)
                 const Center(child: CircularProgressIndicator())

@@ -5,6 +5,8 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
+import '../services/realtime_event.dart';
 
 class PatientLocationScreen extends StatefulWidget {
   final int patientId;
@@ -39,6 +41,8 @@ class _PatientLocationScreenState extends State<PatientLocationScreen> {
   Map<String, dynamic>? _safeZone;
   bool _loading = true;
   String? _error;
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  StreamSubscription<void>? _resumeSubscription;
 
   @override
   void initState() {
@@ -47,11 +51,23 @@ class _PatientLocationScreenState extends State<PatientLocationScreen> {
     _longitude = widget.initialLongitude;
     _fetchLocation();
     _pollTimer = Timer.periodic(_pollInterval, (_) => _fetchLocation(silent: true));
+    _realtimeSubscription = NotificationService.events.listen((event) {
+      if (!mounted || event.type != 'LOCATION_UPDATED' || event.patientId != widget.patientId) return;
+      setState(() {
+        _latitude = double.tryParse(event.data['latitude']?.toString() ?? '');
+        _longitude = double.tryParse(event.data['longitude']?.toString() ?? '');
+        _lastUpdated = DateTime.tryParse(event.data['timestamp']?.toString() ?? '');
+      });
+      _moveCamera();
+    });
+    _resumeSubscription = NotificationService.resumeEvents.listen((_) => _fetchLocation());
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _realtimeSubscription?.cancel();
+    _resumeSubscription?.cancel();
     _mapController?.dispose();
     super.dispose();
   }

@@ -28,13 +28,19 @@ class GameResultCreateSerializer(serializers.ModelSerializer):
 
 class ReminderSerializer(serializers.ModelSerializer):
     type = serializers.CharField(source='reminder_type', read_only=True)
-    date = serializers.DateField(source='scheduled_for', read_only=True)
-    time = serializers.TimeField(source='scheduled_for', read_only=True)
+    date = serializers.SerializerMethodField()
+    time = serializers.SerializerMethodField()
 
     class Meta:
         model = Reminder
         fields = ['id', 'patient', 'caregiver', 'type', 'reminder_type', 'medicine_name', 'message', 'scheduled_for', 'date', 'time', 'status', 'triggered_at', 'completed_at', 'missed_at', 'created_at']
         read_only_fields = ['id', 'patient', 'caregiver', 'type', 'date', 'time', 'status', 'triggered_at', 'completed_at', 'missed_at', 'created_at']
+
+    def get_date(self, obj):
+        return obj.scheduled_for.date()
+
+    def get_time(self, obj):
+        return obj.scheduled_for.time()
 
     def validate(self, attrs):
         reminder_type = attrs.get('reminder_type', self.instance.reminder_type if self.instance else None)

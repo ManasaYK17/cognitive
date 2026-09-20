@@ -1,11 +1,12 @@
 import json
+import logging
+import time
 from datetime import timedelta
 
 import numpy as np
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.core.signing import dumps
 from django.utils import timezone
 from rest_framework import status, views
@@ -32,6 +33,8 @@ from .services import (
     encoding_matches_current_backend,
     generate_encoding,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DeviceScopedRateThrottle(SimpleRateThrottle):
@@ -149,11 +152,13 @@ class IdentifyPatientView(views.APIView):
         return best_confidence
 
     def post(self, request, *args, **kwargs):
+        request_started_at = time.perf_counter()
         image = request.FILES.get('image')
         if not image:
             return Response({'detail': 'An image is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         image = self._coerce_image(image)
+        logger.info('recognition_timing request_parse elapsed_ms=%.1f', (time.perf_counter() - request_started_at) * 1000)
 
         try:
             face_location = detect_face(image)
@@ -182,33 +187,26 @@ class IdentifyPatientView(views.APIView):
             elif patient_confidence > second_best_confidence:
                 second_best_confidence = patient_confidence
 
-        # A known person's face must never be accepted as the patient just
-        # because the patient reference also produces a high score. Compare
-        # the capture against every registered known person before issuing a
-        # patient session token.
-        best_known_person_confidence = 0.0
-        for known_person in KnownPerson.objects.all():
-            self._ensure_face_encodings(known_person)
-            known_person_encodings = FaceEncoding.objects.filter(
-                face_image__content_type=ContentType.objects.get_for_model(known_person),
-                face_image__object_id=known_person.id,
-            )
-            for face_encoding in known_person_encodings:
-                confidence = self._similarity_score(encoding, face_encoding.encoding)
-                best_known_person_confidence = max(best_known_person_confidence, confidence)
+        # Same-patient known people are a separate flow that happens after the
+        # patient session token is issued. They should only veto a patient
+        # login when they are clearly and consistently stronger than the
+        # patient candidate, not merely close enough to be confusing.
+        same_patient_known_person_confidence = 0.0
+        if best_patient is not None:
+            for known_person in KnownPerson.objects.filter(patient=best_patient):
+                self._ensure_face_encodings(known_person)
+                known_person_encodings = FaceEncoding.objects.filter(
+                    face_image__content_type=ContentType.objects.get_for_model(known_person),
+                    face_image__object_id=known_person.id,
+                )
+                for face_encoding in known_person_encodings:
+                    confidence = self._similarity_score(encoding, face_encoding.encoding)
+                    same_patient_known_person_confidence = max(same_patient_known_person_confidence, confidence)
 
-        # Require the winner to clearly beat the runner-up, not just clear
-        # the threshold -- otherwise two similar-looking people can produce
-        # near-tied scores and the system confidently "picks" the wrong one.
-        # Also reject a patient match when a same-patient known person is
-        # itself a strong match and nearly as confident, which is more likely
-        # a known-person scan.
-        # A known-person face must not be accepted as the patient, regardless
-        # of whether the request came from the automatic phone scan.
-        known_person_exclusion_threshold = threshold
         known_person_is_too_close = (
-            best_known_person_confidence >= known_person_exclusion_threshold
-            and best_known_person_confidence >= best_confidence - match_margin
+            best_patient is not None
+            and same_patient_known_person_confidence >= threshold
+            and same_patient_known_person_confidence >= best_confidence + match_margin
         )
         matched = (
             best_patient is not None
@@ -305,6 +303,14 @@ class IdentifyKnownPersonView(views.APIView):
     throttle_classes = [DeviceScopedRateThrottle]
 
     @staticmethod
+    def _get_or_create_unknown_person(patient):
+        return KnownPerson.objects.get_or_create(
+            patient=patient,
+            name='Unknown',
+            defaults={'relationship': 'Unknown'},
+        )[0]
+
+    @staticmethod
     def _ensure_face_encodings(subject):
         if subject is None:
             return
@@ -349,25 +355,12 @@ class IdentifyKnownPersonView(views.APIView):
         ).order_by('-created_at').first()
 
     def post(self, request, *args, **kwargs):
+        request_started_at = time.perf_counter()
         image = request.FILES.get('image')
         if not image:
             return Response({'detail': 'An image is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         image = self._coerce_image(image)
-
-        # TEMP debug: this pipeline only ever holds the uploaded frame in memory
-        # for encoding, so there was previously no way to see what the specs
-        # hardware actually captured. Stash a copy under media/debug_captures/
-        # for inspection; harmless if it fails (image processing still proceeds).
-        try:
-            image.seek(0)
-            debug_name = default_storage.save(
-                f"debug_captures/{timezone.now():%Y%m%d_%H%M%S_%f}.jpg", image
-            )
-            image.seek(0)
-            print(f"[DEBUG] Saved identify capture to media/{debug_name}")
-        except Exception as exc:
-            print(f"[DEBUG] Failed to save identify capture: {exc}")
 
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
@@ -465,16 +458,42 @@ class IdentifyKnownPersonView(views.APIView):
         best_confidence = 0.0
         second_best_confidence = 0.0
 
-        for known_person in KnownPerson.objects.filter(patient=patient):
+        known_people = list(KnownPerson.objects.filter(patient=patient))
+        known_loading_started_at = time.perf_counter()
+        for known_person in known_people:
             normalized_name = (known_person.name or '').strip().lower()
             if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
                 continue
             self._ensure_face_encodings(known_person)
-            patient_encodings = FaceEncoding.objects.filter(face_image__content_type=ContentType.objects.get_for_model(known_person), face_image__object_id=known_person.id)
-            person_confidence = 0.0
+        known_content_type = ContentType.objects.get_for_model(KnownPerson)
+        encodings_by_person = {}
+        for face_encoding in FaceEncoding.objects.filter(
+            face_image__content_type=known_content_type,
+            face_image__object_id__in=[person.id for person in known_people],
+        ).select_related('face_image'):
+            encodings_by_person.setdefault(face_encoding.face_image.object_id, []).append(face_encoding)
+        logger.info('recognition_timing known_face_loading elapsed_ms=%.1f count=%s', (time.perf_counter() - known_loading_started_at) * 1000, len(encodings_by_person))
+
+        for known_person in known_people:
+            comparison_started_at = time.perf_counter()
+            normalized_name = (known_person.name or '').strip().lower()
+            if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                continue
+            patient_encodings = encodings_by_person.get(known_person.id, [])
+            person_scores = []
             for face_encoding in patient_encodings:
                 confidence = self._similarity_score(encoding, face_encoding.encoding)
-                person_confidence = max(person_confidence, confidence)
+                person_scores.append(confidence)
+            person_scores.sort(reverse=True)
+            # Do not let one accidentally similar reference image identify an
+            # unknown person. When multiple enrollment images exist, require
+            # the two strongest references to agree; single-image enrollments
+            # retain the normal threshold behavior.
+            if len(person_scores) >= 2:
+                person_confidence = (person_scores[0] + person_scores[1]) / 2.0
+            else:
+                person_confidence = person_scores[0] if person_scores else 0.0
+            logger.info('recognition_timing comparison person_id=%s elapsed_ms=%.1f', known_person.id, (time.perf_counter() - comparison_started_at) * 1000)
             if person_confidence > best_confidence:
                 second_best_known_person = best_known_person
                 second_best_confidence = best_confidence
@@ -554,7 +573,11 @@ class IdentifyKnownPersonView(views.APIView):
         matched = (
             best_known_person is not None
             and best_confidence >= eff_threshold
-            and ((best_confidence - second_best_confidence) >= eff_margin or ((hardware_source or phone_source) and same_named_person))
+            and (
+                second_best_known_person is None
+                or (best_confidence - second_best_confidence) >= eff_margin
+                or (hardware_source and same_named_person)
+            )
         )
         if matched and best_known_person is not None:
             normalized_name = (best_known_person.name or '').strip().lower()
@@ -563,6 +586,11 @@ class IdentifyKnownPersonView(views.APIView):
                 best_known_person = None
 
         source_value = request.data.get('source', 'phone_camera')
+        unknown_person = None
+        if not matched and source_value == 'specs_hardware':
+            unknown_person = self._get_or_create_unknown_person(patient)
+            best_known_person = unknown_person
+
         subject_content_type = ContentType.objects.get_for_model(best_known_person) if best_known_person is not None else None
         if matched and best_known_person is not None:
             RecognitionHistory.objects.create(
@@ -574,9 +602,19 @@ class IdentifyKnownPersonView(views.APIView):
                 confidence_score=best_confidence,
                 outcome='matched',
             )
+        elif not matched:
+            RecognitionHistory.objects.create(
+                patient=patient,
+                subject_type='known_person',
+                content_type=subject_content_type,
+                object_id=best_known_person.id if best_known_person is not None else None,
+                source=source_value,
+                confidence_score=best_confidence,
+                outcome='not_matched',
+            )
 
         last_summary = None
-        if matched and best_known_person is not None:
+        if best_known_person is not None:
             latest_conversation = ConversationHistory.objects.filter(
                 patient_id=patient.id, known_person_id=best_known_person.id
             ).order_by('-created_at').first()
@@ -620,11 +658,17 @@ class IdentifyKnownPersonView(views.APIView):
                             outcome='known_person_push',
                         )
 
+        logger.info('recognition_timing total elapsed_ms=%.1f matched=%s confidence=%.4f', (time.perf_counter() - request_started_at) * 1000, matched, best_confidence)
+        response_name = best_known_person.name if matched and best_known_person is not None else None
+        response_id = best_known_person.id if matched and best_known_person is not None else None
+        if not matched and source_value == 'specs_hardware':
+            response_name = 'Unknown'
+            response_id = unknown_person.id if unknown_person is not None else None
         return Response({
             'match': matched,
             'confidence': round(best_confidence, 4),
-            'id': best_known_person.id if matched and best_known_person is not None else None,
-            'name': best_known_person.name if matched and best_known_person is not None else None,
+            'id': response_id,
+            'name': response_name,
             'relationship': best_known_person.relationship if matched and best_known_person is not None else None,
             'patient_id': patient.id,
             'last_summary': last_summary,

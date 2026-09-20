@@ -9,6 +9,7 @@ class ConversationHistory(models.Model):
     transcript = models.TextField()
     summary = models.TextField(blank=True, null=True)
     error_message = models.TextField(blank=True, null=True)
+    audio_file = models.FileField(upload_to='conversation_audio/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

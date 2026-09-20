@@ -8,6 +8,7 @@ import wave
 
 import numpy as np
 import requests
+from django.conf import settings
 from scipy.signal import butter, filtfilt
 try:
     import speech_recognition as sr
@@ -35,7 +36,7 @@ class SummarizationError(Exception):
 _TRANSCRIBE_CHUNK_SECONDS = 10
 
 
-def _recognize_chunk(recognizer, audio_data):
+def _recognize_chunk(recognizer, audio_data, language='en-IN'):
     # Prefer local offline recognition if available, otherwise fall back.
     if hasattr(recognizer, 'recognize_sphinx'):
         try:
@@ -46,7 +47,7 @@ def _recognize_chunk(recognizer, audio_data):
             return None
 
     try:
-        return recognizer.recognize_google(audio_data)
+        return recognizer.recognize_google(audio_data, language=language)
     except sr.RequestError as exc:
         raise SpeechToTextError(f'Speech recognition service error: {exc}') from exc
     except sr.UnknownValueError:
@@ -82,7 +83,8 @@ def _normalize_audio_bytes(raw_bytes, source_name='audio'):
         return None
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        input_path = os.path.join(tmpdir, source_name or 'audio_input')
+        input_name = os.path.basename(source_name or 'audio_input')
+        input_path = os.path.join(tmpdir, input_name)
         output_path = os.path.join(tmpdir, 'normalized.wav')
         with open(input_path, 'wb') as handle:
             handle.write(raw_bytes)
@@ -104,7 +106,7 @@ def _normalize_audio_bytes(raw_bytes, source_name='audio'):
             return None
 
 
-def transcribe_audio(audio_file):
+def transcribe_audio(audio_file, language='en-IN'):
     if sr is None:
         raise SpeechToTextError('SpeechRecognition library is not installed.')
 
@@ -128,7 +130,7 @@ def transcribe_audio(audio_file):
     except Exception as exc:
         raise SpeechToTextError(f'Unable to process audio file: {exc}') from exc
 
-    transcripts = [text for text in (_recognize_chunk(recognizer, chunk) for chunk in chunks) if text]
+    transcripts = [text for text in (_recognize_chunk(recognizer, chunk, language=language) for chunk in chunks) if text]
     if not transcripts:
         raise SpeechToTextError('Speech could not be understood.')
     return ' '.join(transcripts)
@@ -188,9 +190,11 @@ def transcribe_audio_high_pass(audio_file):
     return transcribe_audio(io.BytesIO(filtered_bytes))
 
 
-def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_seconds=60):
+def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_seconds=60, target_language='English'):
+    target_language_label = (target_language or 'English').strip() or 'English'
     prompt = (
-        'Please provide a concise 2-3 sentence summary of the following conversation transcript:\n\n'
+        f'Please provide a concise 2-3 sentence summary of the following conversation transcript in {target_language_label}. '
+        'Keep the output only in that language and do not include English explanation.\n\n'
         f'{transcript}\n\n'
         'Summary:'
     )
@@ -275,6 +279,80 @@ def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_
         raise SummarizationError('Ollama response did not contain text output.')
 
     return text.strip()
+
+
+def process_saved_conversation(conversation_id, transcriber=None, summarizer=None, target_language='English'):
+    """Transcribe and summarize a saved audio conversation in the background.
+
+    This keeps the worker API compatible with the older code path that was still
+    invoking it from the view layer after the row had been created.
+    """
+    from .models import ConversationHistory
+
+    transcriber = transcriber or transcribe_audio
+    summarizer = summarizer or summarize_transcript
+
+    try:
+        conversation = ConversationHistory.objects.select_related('patient', 'known_person').get(pk=conversation_id)
+    except ConversationHistory.DoesNotExist:
+        logger.warning('Conversation processing skipped for missing record %s', conversation_id)
+        return
+
+    audio = conversation.audio_file
+    if audio is None or not getattr(audio, 'name', None):
+        conversation.error_message = 'No audio file attached to this conversation.'
+        conversation.save(update_fields=['error_message'])
+        return
+
+    transcript = ''
+    try:
+        transcript = transcriber(audio, language=_language_to_code(target_language))
+        conversation.transcript = transcript
+        conversation.summary = ''
+        conversation.error_message = None
+        conversation.save(update_fields=['transcript', 'summary', 'error_message'])
+    except SpeechToTextError as exc:
+        conversation.transcript = ''
+        conversation.summary = ''
+        conversation.error_message = str(exc)
+        conversation.save(update_fields=['transcript', 'summary', 'error_message'])
+        return
+
+    openrouter_url = getattr(settings, 'OPENROUTER_API_URL', '')
+    openrouter_api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
+    openrouter_model_name = getattr(settings, 'OPENROUTER_MODEL_NAME', 'qwen-2.5-mini')
+    ollama_url = getattr(settings, 'OLLAMA_API_URL', 'http://localhost:11434/api/generate')
+    ollama_model_name = getattr(settings, 'OLLAMA_MODEL_NAME', 'qwen2.5:7b')
+
+    if openrouter_api_key:
+        api_url = openrouter_url
+        model_name = openrouter_model_name
+        api_key = openrouter_api_key
+    else:
+        api_url = ollama_url
+        model_name = ollama_model_name
+        api_key = None
+
+    try:
+        summary = summarizer(transcript, api_url, model_name, api_key=api_key, target_language=target_language)
+        conversation.summary = summary
+        conversation.error_message = None
+    except SummarizationError as exc:
+        conversation.summary = ''
+        conversation.error_message = str(exc)
+
+    conversation.save(update_fields=['summary', 'error_message'])
+
+
+def _language_to_code(language_name):
+    mapping = {
+        'English': 'en-IN',
+        'Kannada': 'kn-IN',
+        'Telugu': 'te-IN',
+        'Tamil': 'ta-IN',
+        'Hindi': 'hi-IN',
+    }
+    return mapping.get((language_name or 'English').strip(), 'en-IN')
 
 
 def _read_audio_bytes(audio_file):

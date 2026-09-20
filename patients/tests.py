@@ -9,6 +9,7 @@ from conversations.models import ConversationHistory
 from geofencing.models import LocationPing, SafeZone
 from history.models import RecognitionHistory
 from known_people.models import KnownPerson
+from cognitive_features.models import Reminder
 
 
 class PatientTests(APITestCase):
@@ -60,6 +61,22 @@ class PatientTests(APITestCase):
         replacement_response = self.client.post(upload_url, {'files': [image_two]}, format='multipart')
         self.assertEqual(replacement_response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(FaceImage.objects.filter(patient_subject=patient).count(), 1)
+
+    def test_caregiver_can_delete_a_reminder(self):
+        patient = Patient.objects.create(caregiver=self.caregiver, name='Charlie', age=74, medical_notes='Needs a reminder delete test')
+        reminder = Reminder.objects.create(
+            patient=patient,
+            caregiver=self.caregiver,
+            reminder_type=Reminder.MEDICINE,
+            medicine_name='Vitamin D',
+            message='',
+            scheduled_for=timezone.now().replace(microsecond=0),
+        )
+
+        response = self.client.delete(reverse('reminder-detail', kwargs={'pk': reminder.id}))
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Reminder.objects.filter(id=reminder.id).exists())
 
     def test_dashboard_summary_includes_aggregated_metrics(self):
         patient = Patient.objects.create(caregiver=self.caregiver, name='Dana', age=72, medical_notes='Summary test')

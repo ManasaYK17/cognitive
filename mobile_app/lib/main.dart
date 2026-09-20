@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'theme/design_tokens.dart';
 import 'services/api_client.dart';
+import 'services/app_language.dart';
 import 'services/auth_service.dart';
 import 'services/recognition_service.dart';
 import 'services/notification_service.dart';
@@ -14,20 +15,32 @@ void main() async {
   await NotificationService.initialize();
   final authService = AuthService();
   final locationService = LocationService();
+  final appLanguage = AppLanguage();
+  await appLanguage.load();
   ApiClient.onUnauthorized = authService.forceLogout;
   // Ends background location reporting whenever a patient session actually
   // ends (exit patient mode, forced logout) -- without this, reporting kept
   // running (foreground service included) until the process happened to die.
   authService.onPatientSessionCleared = locationService.stopReporting;
   await authService.loadPersistedToken();
-  runApp(CognitiveAssistApp(authService: authService, locationService: locationService));
+  runApp(CognitiveAssistApp(
+    authService: authService,
+    locationService: locationService,
+    appLanguage: appLanguage,
+  ));
 }
 
 class CognitiveAssistApp extends StatefulWidget {
   final AuthService authService;
   final LocationService locationService;
+  final AppLanguage appLanguage;
 
-  const CognitiveAssistApp({required this.authService, required this.locationService, super.key});
+  const CognitiveAssistApp({
+    required this.authService,
+    required this.locationService,
+    required this.appLanguage,
+    super.key,
+  });
 
   @override
   State<CognitiveAssistApp> createState() => _CognitiveAssistAppState();
@@ -39,13 +52,19 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.authService.addListener(_handleAuthChange);
+    widget.appLanguage.addListener(_handleLanguageChange);
   }
 
   @override
   void dispose() {
     widget.authService.removeListener(_handleAuthChange);
+    widget.appLanguage.removeListener(_handleLanguageChange);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _handleLanguageChange() {
+    if (mounted) setState(() {});
   }
 
   void _handleAuthChange() {
@@ -76,6 +95,8 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
       widget.authService.ensurePatientDeviceTokenRegistered();
       NotificationService.consumePendingKnownPersonPush();
       NotificationService.consumePendingGeofenceAlert();
+      NotificationService.consumePendingRealtimeEvents();
+      NotificationService.notifyResumed();
     }
   }
 
@@ -87,15 +108,20 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
         ChangeNotifierProvider(create: (_) => RecognitionService()),
         ChangeNotifierProvider.value(value: widget.locationService),
         ChangeNotifierProvider(create: (_) => AudioService()),
+        ChangeNotifierProvider.value(value: widget.appLanguage),
       ],
-      child: MaterialApp(
-        title: 'Cognitive Assist',
-        navigatorKey: NotificationService.navigatorKey,
-        theme: DesignTokens.darkTheme(),
-        darkTheme: DesignTokens.darkTheme(),
-        themeMode: ThemeMode.dark,
-        debugShowCheckedModeBanner: false,
-        home: const FaceScanScreen(),
+      child: Consumer<AppLanguage>(
+        builder: (context, appLanguage, _) => MaterialApp(
+          title: 'Cognitive Assist',
+          navigatorKey: NotificationService.navigatorKey,
+          locale: appLanguage.locale,
+          supportedLocales: AppLanguage.supportedLocales,
+          theme: DesignTokens.darkTheme(),
+          darkTheme: DesignTokens.darkTheme(),
+          themeMode: ThemeMode.dark,
+          debugShowCheckedModeBanner: false,
+          home: const FaceScanScreen(),
+        ),
       ),
     );
   }

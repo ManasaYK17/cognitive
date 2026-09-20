@@ -1,13 +1,26 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../services/cognitive_features_service.dart';
 
 class ReminderAlarmScreen extends StatefulWidget {
   final Map<String, dynamic> reminder;
   final String sessionToken;
+
   const ReminderAlarmScreen({required this.reminder, required this.sessionToken, super.key});
-  @override State<ReminderAlarmScreen> createState() => _ReminderAlarmScreenState();
+
+  static Map<String, dynamic> buildUsageReminder() {
+    return {
+      'id': -1,
+      'type': 'usage',
+      'message': 'You are still using this application. Please continue using it safely.',
+      'status': 'triggered',
+    };
+  }
+
+  @override
+  State<ReminderAlarmScreen> createState() => _ReminderAlarmScreenState();
 }
 
 class _ReminderAlarmScreenState extends State<ReminderAlarmScreen> {
@@ -17,11 +30,27 @@ class _ReminderAlarmScreenState extends State<ReminderAlarmScreen> {
   bool _saving = false;
 
   String get _type => widget.reminder['type']?.toString() ?? 'other';
-  String get _message => _type == 'medicine' ? 'Time to take ${widget.reminder['medicine_name']}' : (widget.reminder['message']?.toString() ?? 'Reminder');
+  String get _message => _type == 'medicine'
+      ? 'Time to take ${widget.reminder['medicine_name']}'
+      : (_type == 'usage'
+          ? 'You are still using this application.'
+          : (widget.reminder['message']?.toString() ?? 'Reminder'));
 
   @override
-  void initState() { super.initState(); _timeout = Timer(const Duration(minutes: 5), () => _finish('missed')); _tts.speak(_message); }
-  @override void dispose() { _timeout?.cancel(); _tts.stop(); super.dispose(); }
+  void initState() {
+    super.initState();
+    _timeout = Timer(const Duration(minutes: 5), () => _finish('missed'));
+    HapticFeedback.heavyImpact();
+    HapticFeedback.heavyImpact();
+    _tts.speak(_message);
+  }
+
+  @override
+  void dispose() {
+    _timeout?.cancel();
+    _tts.stop();
+    super.dispose();
+  }
   Future<void> _finish(String status) async { if (_saving) return; setState(() => _saving = true); try { await _service.updateReminderStatus(widget.sessionToken, widget.reminder['id'] as int, status); } catch (_) {} if (mounted) Navigator.of(context).pop(); }
 
   @override
