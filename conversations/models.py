@@ -8,6 +8,8 @@ class ConversationHistory(models.Model):
     known_person = models.ForeignKey(KnownPerson, related_name='conversation_history', on_delete=models.CASCADE)
     transcript = models.TextField()
     summary = models.TextField(blank=True, null=True)
+    content_language = models.CharField(max_length=20, default='English')
+    localized_content = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True, null=True)
     audio_file = models.FileField(upload_to='conversation_audio/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -2,6 +2,7 @@ from django.urls import reverse
 from django.core.signing import dumps
 from rest_framework import status
 from rest_framework.test import APITestCase
+from unittest.mock import patch
 from accounts.models import Caregiver
 from patients.models import Patient
 from known_people.models import KnownPerson
@@ -101,3 +102,26 @@ class HistoryEndpointsTests(APITestCase):
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]['known_person_name'], 'Mina')
         self.assertEqual(response.data[0]['last_summary'], 'Brief summary')
+
+    @patch('conversations.services.translate_conversation_text')
+    def test_patient_history_view_translates_and_caches_stored_conversation(self, mock_translate):
+        mock_translate.side_effect = lambda text, language: f'{language}: {text}'
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.patient_token}')
+        params = {
+            'known_person_id': str(self.known_person.id),
+            'language': 'Kannada',
+        }
+
+        first_response = self.client.get(reverse('history-patient-view'), params)
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(first_response.data[0]['summary'], 'Kannada: Brief summary')
+        self.assertEqual(first_response.data[0]['transcript'], 'Kannada: Hello, this is a conversation.')
+        self.conversation.refresh_from_db()
+        self.assertEqual(self.conversation.summary, 'Brief summary')
+        self.assertEqual(self.conversation.transcript, 'Hello, this is a conversation.')
+
+        second_response = self.client.get(reverse('history-patient-view'), params)
+
+        self.assertEqual(second_response.data[0]['summary'], 'Kannada: Brief summary')
+        self.assertEqual(mock_translate.call_count, 2)

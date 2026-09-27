@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import '../services/app_language.dart';
 import 'patient_history_detail_screen.dart';
 
 class PatientHistoryScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class PatientHistoryScreen extends StatefulWidget {
 class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
   final ApiClient _api = ApiClient();
   bool _loading = true;
+  bool _historyLoadInFlight = false;
   List<dynamic> _history = [];
   Timer? _refreshTimer;
 
@@ -33,17 +35,27 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
   }
 
   Future<void> _loadHistory() async {
-    final response = await _api.get('/history/patient-view/', token: widget.sessionToken);
-    if (response.statusCode == 200) {
-      setState(() {
-        _history = json.decode(response.body) as List<dynamic>;
-        _loading = false;
-      });
-      return;
+    if (!mounted || _historyLoadInFlight) return;
+    _historyLoadInFlight = true;
+    try {
+      final response = await _api.get(
+        '/history/patient-view/',
+        token: widget.sessionToken,
+        params: {'language': AppLanguage().language},
+        timeout: const Duration(seconds: 65),
+      );
+      if (!mounted) return;
+      if (response.statusCode == 200) {
+        setState(() {
+          _history = json.decode(response.body) as List<dynamic>;
+          _loading = false;
+        });
+        return;
+      }
+      setState(() => _loading = false);
+    } finally {
+      _historyLoadInFlight = false;
     }
-    setState(() {
-      _loading = false;
-    });
   }
 
   @override

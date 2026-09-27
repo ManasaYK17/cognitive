@@ -39,6 +39,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   Timer? _recognitionPollTimer;
   String? _lastHardwareRecognitionTimestamp;
   bool _openingHardwareResult = false;
+  bool _recognitionPollingInFlight = false;
   bool _gameMode = false;
   Timer? _reminderTimer;
   Timer? _usageReminderTimer;
@@ -126,39 +127,43 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
   void _startRecognitionPolling() {
     _recognitionPollTimer?.cancel();
-    _recognitionPollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
-      if (!mounted) return;
-      final response = await _api.get(
-        '/history/patient-recognition/',
-        token: widget.sessionToken,
-        params: {if (_lastHardwareRecognitionTimestamp != null) 'after': _lastHardwareRecognitionTimestamp!},
-      );
-      debugPrint('[patient_home] recognition poll status=${response.statusCode} body=${response.body}');
-      if (!mounted || response.statusCode != 200) return;
-      final payload = json.decode(response.body) as Map<String, dynamic>;
-      if (payload['match'] != true) return;
-      final timestamp = payload['timestamp'] as String?;
-      if (timestamp == null || timestamp == _lastHardwareRecognitionTimestamp) return;
-      if (_openingHardwareResult) return;
-      _openingHardwareResult = true;
+    _recognitionPollTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      if (!mounted || _recognitionPollingInFlight) return;
+      _recognitionPollingInFlight = true;
       try {
-        debugPrint('[patient_home] hardware match payload=$payload');
-        final navigated = await _openHardwareResult(payload);
-        if (navigated && mounted) {
-          _lastHardwareRecognitionTimestamp = timestamp;
+        final response = await _api.get(
+          '/history/patient-recognition/',
+          token: widget.sessionToken,
+          params: {if (_lastHardwareRecognitionTimestamp != null) 'after': _lastHardwareRecognitionTimestamp!},
+        );
+        debugPrint('[patient_home] recognition poll status=${response.statusCode} body=${response.body}');
+        if (!mounted || response.statusCode != 200) return;
+        final payload = json.decode(response.body) as Map<String, dynamic>;
+        if (payload['match'] != true) return;
+        final timestamp = payload['timestamp'] as String?;
+        if (timestamp == null || timestamp == _lastHardwareRecognitionTimestamp || _openingHardwareResult) return;
+        _openingHardwareResult = true;
+        try {
+          debugPrint('[patient_home] hardware match payload=$payload');
+          final navigated = await _openHardwareResult(payload);
+          if (navigated && mounted) {
+            _lastHardwareRecognitionTimestamp = timestamp;
+          }
+        } catch (error, stackTrace) {
+          debugPrint('[patient_home] failed to open hardware result: $error');
+          debugPrint(stackTrace.toString());
+        } finally {
+          _openingHardwareResult = false;
         }
-      } catch (error, stackTrace) {
-        debugPrint('[patient_home] failed to open hardware result: $error');
-        debugPrint(stackTrace.toString());
       } finally {
-        _openingHardwareResult = false;
+        _recognitionPollingInFlight = false;
       }
     });
   }
 
   void _startUsageReminderLoop() {
     _usageReminderTimer?.cancel();
-    _usageReminderTimer = Timer.periodic(const Duration(minutes: 20), (_) {
+    _usageReminderTimer = Timer.periodic(const Duration(minutes: 10), (_) {
       if (!mounted || _usageReminderActive || _openingReminder) return;
       _usageReminderActive = true;
       unawaited(_showUsageReminder());
@@ -209,7 +214,6 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           knownPersonName: name,
           knownPersonRelationship: payload['relationship']?.toString(),
           sessionToken: widget.sessionToken,
-          initialLastSummary: payload['last_summary']?.toString(),
           recordFromPhone: false,
         ),
       ),
@@ -246,8 +250,15 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   Future<void> _loadRecentMemories() async {
+    if (!mounted) return;
     setState(() => _loadingMemories = true);
-    final response = await _api.get('/history/patient-view/', token: widget.sessionToken, params: {'limit': '5'});
+    final response = await _api.get(
+      '/history/patient-view/',
+      token: widget.sessionToken,
+      params: {'limit': '5', 'language': AppLanguage().language},
+      timeout: const Duration(seconds: 65),
+    );
+    if (!mounted) return;
     if (response.statusCode == 200) {
       setState(() {
         _recentMemories = json.decode(response.body) as List<dynamic>;
@@ -331,7 +342,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     if (!mounted) return;
     setState(() => _scanning = false);
 
-    if (payload == null || payload['match'] != true) {
+    final recognitionPayload = payload;
+    if (recognitionPayload == null) {
       final message = appLanguage.translate('unknown_person_detected');
       await _announceMessage(message);
       messenger.showSnackBar(
@@ -340,9 +352,35 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
       return;
     }
 
-    final knownPersonId = payload['id'] as int? ?? 0;
-    final knownPersonName = payload['name'] as String? ?? 'Person';
-    final knownPersonRelationship = payload['relationship'] as String?;
+    if (recognitionPayload['match'] != true) {
+      final unknownPersonId = recognitionPayload['id'] as int?;
+      if (unknownPersonId == null) {
+        final message = appLanguage.translate('unknown_person_detected');
+        await _announceMessage(message);
+        messenger.showSnackBar(
+          SnackBar(content: Text('$message. ${appLanguage.translate('try_again')}')),
+        );
+        return;
+      }
+
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => PatientRecognitionResultScreen(
+            patientId: widget.patientId,
+            knownPersonId: unknownPersonId,
+            knownPersonName: 'Unknown',
+            knownPersonRelationship: 'None',
+            sessionToken: widget.sessionToken,
+            recordFromPhone: true,
+          ),
+        ),
+      );
+      return;
+    }
+
+    final knownPersonId = recognitionPayload['id'] as int? ?? 0;
+    final knownPersonName = recognitionPayload['name'] as String? ?? 'Person';
+    final knownPersonRelationship = recognitionPayload['relationship'] as String?;
     if (knownPersonId != 0 && knownPersonName != 'Person') {
       await _announceMessage('Recognized $knownPersonName');
       navigator.push(
@@ -461,9 +499,38 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         elevation: 0,
         automaticallyImplyLeading: false,
         leading: _gameMode ? IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => setState(() => _gameMode = false)) : null,
-        title: _gameMode ? Text(appLanguage.translate('patient_mode')) : null,
+        title: Text(
+          appLanguage.translate(_gameMode ? 'games' : 'patient_mode'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
-          Row(children: [Text(appLanguage.translate('patient_mode'), style: const TextStyle(fontSize: 15)), Switch(value: _gameMode, onChanged: (value) => setState(() => _gameMode = value))]),
+          Tooltip(
+            message: appLanguage.translate(_gameMode ? 'games' : 'patient_mode'),
+            child: Switch(
+              value: _gameMode,
+              onChanged: (value) => setState(() => _gameMode = value),
+            ),
+          ),
+          PopupMenuButton<String>(
+            tooltip: appLanguage.translate('language'),
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (language) {
+              appLanguage.setLanguage(language);
+            },
+            itemBuilder: (context) => AppLanguage.supportedLanguages
+                .map((language) => PopupMenuItem<String>(
+                      value: language,
+                      child: Text(
+                        language,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          color: language == appLanguage.language ? Theme.of(context).colorScheme.primary : null,
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white70),
             tooltip: 'Exit to caregiver sign-in',

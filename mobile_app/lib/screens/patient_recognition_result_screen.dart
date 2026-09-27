@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_client.dart';
 import '../services/app_language.dart';
 import '../services/audio_service.dart';
@@ -45,7 +44,6 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   double _volumeLevel = 0.0;
   Timer? _silenceTimer;
   Timer? _amplitudeMonitorTimer;
-  static const _languageKey = 'patient_selected_conversation_language';
   static const List<String> _supportedLanguages = ['English', 'Kannada', 'Telugu', 'Tamil', 'Hindi'];
   String _selectedLanguage = 'English';
 
@@ -53,26 +51,19 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   void initState() {
     super.initState();
     _lastSummary = widget.initialLastSummary?.trim().isNotEmpty == true ? widget.initialLastSummary : null;
-    _loadSelectedLanguage();
+    _selectedLanguage = AppLanguage().language;
     _initializeTts();
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadAndCapture());
   }
 
-  Future<void> _loadSelectedLanguage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString(_languageKey) ?? 'English';
-    if (!mounted) return;
-    setState(() {
-      _selectedLanguage = _supportedLanguages.contains(stored) ? stored : 'English';
-    });
-  }
-
   Future<void> _saveSelectedLanguage(String language) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_languageKey, language);
     final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     await appLanguage.setLanguage(language);
-    if (mounted) setState(() => _selectedLanguage = language);
+    if (!mounted) return;
+    setState(() => _selectedLanguage = language);
+    _lastSummary = null;
+    await _fetchLastSummary();
+    if (mounted) setState(() {});
   }
 
   Future<void> _initializeTts() async {
@@ -113,7 +104,13 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
     final response = await _api.get(
       '/history/patient-view/',
       token: widget.sessionToken,
-      params: {'known_person_id': widget.knownPersonId.toString()},
+      params: {
+        'known_person_id': widget.knownPersonId.toString(),
+        'language': Provider.of<AppLanguage>(context, listen: false).language,
+        'summary_only': 'true',
+        'limit': '1',
+      },
+      timeout: const Duration(seconds: 65),
     );
 
     if (response.statusCode == 200) {
@@ -126,12 +123,17 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
 
   Future<void> _speakSummary() async {
     final appLanguage = Provider.of<AppLanguage>(context, listen: false);
-    final relationshipLabel = widget.knownPersonRelationship?.trim().isNotEmpty == true
+    final isUnknownPerson = widget.knownPersonName.trim().toLowerCase() == 'unknown';
+    final relationship = widget.knownPersonRelationship?.trim();
+    final relationshipLabel = relationship != null && relationship.isNotEmpty && relationship.toLowerCase() != 'none'
         ? ' your ${widget.knownPersonRelationship}'
         : '';
+    final recognizedLabel = isUnknownPerson
+      ? appLanguage.translate('unknown_person_detected')
+      : 'Recognized ${widget.knownPersonName}$relationshipLabel';
     final speakText = _lastSummary?.trim().isNotEmpty == true
-        ? 'Recognized ${widget.knownPersonName}$relationshipLabel. Last summary: ${_lastSummary!}. Please speak when ready and the app will capture your conversation.'
-        : 'Recognized ${widget.knownPersonName}$relationshipLabel. Please speak when ready and the app will capture your conversation.';
+      ? '$recognizedLabel. Last summary: ${_lastSummary!}. Please speak when ready and the app will capture your conversation.'
+      : '$recognizedLabel. Please speak when ready and the app will capture your conversation.';
 
     setState(() {
       _statusMessage = appLanguage.translate('speaking_last_summary');
@@ -214,7 +216,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
       widget.patientId,
       widget.knownPersonId,
       widget.sessionToken,
-      language: _selectedLanguage,
+      language: Provider.of<AppLanguage>(context, listen: false).language,
     );
     if (!mounted) return;
 
@@ -287,8 +289,9 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   @override
   Widget build(BuildContext context) {
     final appLanguage = Provider.of<AppLanguage>(context);
+    final isUnknownPerson = widget.knownPersonName.trim().toLowerCase() == 'unknown';
     final languageMenuButton = PopupMenuButton<String>(
-      tooltip: 'Select language',
+      tooltip: appLanguage.translate('language'),
       icon: const Icon(Icons.more_vert, color: Colors.white),
       onSelected: (value) async {
         await _saveSelectedLanguage(value);
@@ -309,7 +312,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Recognized: ${widget.knownPersonName}'),
+        title: Text(isUnknownPerson ? 'Unknown' : 'Recognized: ${widget.knownPersonName}'),
       ),
       body: Stack(
         children: [
@@ -334,25 +337,25 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
                           if (widget.knownPersonRelationship?.trim().isNotEmpty == true) ...[
                             const SizedBox(height: 8),
                             Text(
-                              'Relationship: ${widget.knownPersonRelationship}',
+                              '${appLanguage.translate('relationship')}: ${widget.knownPersonRelationship?.trim().toLowerCase() == 'none' ? appLanguage.translate('none') : widget.knownPersonRelationship}',
                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                             ),
                           ],
                           const SizedBox(height: 8),
                           Text(
-                            widget.recordFromPhone ? 'Conversation capture is active.' : 'Your glasses are recording this conversation.',
+                            appLanguage.translate(widget.recordFromPhone ? 'conversation_capture_active' : 'glasses_recording'),
                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
                           ),
                           const SizedBox(height: 16),
                           if (_lastSummary != null) ...[
                             Text(
-                              'Last conversation',
+                              appLanguage.translate('last_conversation'),
                               style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: Colors.white),
                             ),
                             const SizedBox(height: 8),
                             Text(_lastSummary!, style: const TextStyle(fontSize: 15, color: Colors.white70)),
                           ] else ...[
-                            const Text('No previous conversation found.', style: TextStyle(fontSize: 15, color: Colors.white70)),
+                            Text(appLanguage.translate('no_previous_conversation_found'), style: const TextStyle(fontSize: 15, color: Colors.white70)),
                           ],
                         ],
                       ),

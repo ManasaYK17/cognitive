@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 class ApiClient {
   static const timeoutDuration = Duration(seconds: 10);
+  static String? _lastSuccessfulHost;
 
   // Set once at startup (see main.dart) to AuthService.forceLogout. Fired
   // whenever an authenticated request comes back 401, since that means the
@@ -104,6 +105,7 @@ class ApiClient {
     String path, {
     String? token,
     Map<String, String>? params,
+    Duration? timeout,
   }) async {
     final response = await _sendWithFallback(
       (String baseUri) async {
@@ -111,7 +113,7 @@ class ApiClient {
         final headers = <String, String>{
           if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
         };
-        return http.get(uri, headers: headers).timeout(timeoutDuration);
+        return http.get(uri, headers: headers).timeout(timeout ?? timeoutDuration);
       },
       path: path,
       method: 'GET',
@@ -221,10 +223,16 @@ class ApiClient {
   }) async {
     Object? lastError;
     final hosts = getCandidateBaseUrls();
+    final lastSuccessfulHost = _lastSuccessfulHost;
+    if (lastSuccessfulHost != null && hosts.remove(lastSuccessfulHost)) {
+      hosts.insert(0, lastSuccessfulHost);
+    }
     for (final host in hosts) {
       final baseUri = '$host/api';
       try {
-        return await operation(baseUri);
+        final response = await operation(baseUri);
+        _lastSuccessfulHost = host;
+        return response;
       } on TimeoutException catch (error) {
         lastError = error;
         if (kDebugMode) {

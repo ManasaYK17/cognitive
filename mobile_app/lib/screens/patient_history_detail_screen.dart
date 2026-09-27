@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
+import '../services/app_language.dart';
 
 class PatientHistoryDetailScreen extends StatefulWidget {
   final String sessionToken;
@@ -43,7 +44,11 @@ class _PatientHistoryDetailScreenState extends State<PatientHistoryDetailScreen>
     final response = await _api.get(
       '/history/patient-view/',
       token: widget.sessionToken,
-      params: {'known_person_id': widget.knownPersonId.toString()},
+      params: {
+        'known_person_id': widget.knownPersonId.toString(),
+        'language': AppLanguage().language,
+      },
+      timeout: const Duration(seconds: 65),
     );
     if (response.statusCode == 200) {
       setState(() {

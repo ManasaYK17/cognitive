@@ -275,8 +275,10 @@ class RecognitionEndpointTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['match'])
-        self.assertIsNone(response.data.get('id'))
-        self.assertIsNone(response.data.get('name'))
+        unknown_person = KnownPerson.objects.get(patient=self.patient, name='Unknown')
+        self.assertEqual(response.data['id'], unknown_person.id)
+        self.assertEqual(response.data['name'], 'Unknown')
+        self.assertEqual(response.data['relationship'], 'None')
 
     def test_identify_known_person_rebuilds_missing_encodings_for_known_person_images(self):
         FaceEncoding.objects.filter(face_image=self.known_person_face_image).delete()
@@ -342,6 +344,24 @@ class RecognitionEndpointTests(APITestCase):
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['id'], self.known_person.id)
 
+    @patch('recognition.views.compute_similarity', return_value=0.7)
+    def test_phone_auto_capture_accepts_handset_known_person_score(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['id'], self.known_person.id)
+
     @patch('recognition.views.compute_similarity', return_value=0.6)
     def test_phone_auto_capture_rejects_low_confidence_unknown_person(self, _mock_similarity):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
@@ -353,7 +373,36 @@ class RecognitionEndpointTests(APITestCase):
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['match'])
-        self.assertIsNone(response.data['id'])
+        self.assertEqual(response.data['name'], 'Unknown')
+        self.assertEqual(response.data['relationship'], 'None')
+        self.assertEqual(response.data['id'], KnownPerson.objects.get(patient=self.patient, name='Unknown').id)
+
+    @patch('recognition.views.compute_similarity', return_value=0.2)
+    def test_phone_unknown_person_reuses_the_shared_identity(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+
+        first = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+        second = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(color=(10, 20, 30)), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.status_code, status.HTTP_200_OK)
+        self.assertEqual(first.data['id'], second.data['id'])
+        self.assertEqual(first.data['name'], 'Unknown')
+        self.assertEqual(second.data['name'], 'Unknown')
+        self.assertEqual(KnownPerson.objects.filter(patient=self.patient, name='Unknown').count(), 1)
 
     @patch('recognition.views.compute_similarity', return_value=0.6)
     def test_phone_auto_capture_records_unknown_detection_event(self, _mock_similarity):

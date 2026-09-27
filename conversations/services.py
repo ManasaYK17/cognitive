@@ -281,6 +281,114 @@ def summarize_transcript(transcript, api_url, model_name, api_key=None, timeout_
     return text.strip()
 
 
+def translate_conversation_text(text, target_language, timeout_seconds=60):
+    if not text:
+        return text or ''
+
+    target_language = (target_language or 'English').strip() or 'English'
+    prompt = (
+        f'Translate the complete text below into {target_language}. Preserve its meaning, names, dates, '
+        'and conversational tone. Do not summarize or add explanations. Output only the translation.\n\n'
+        f'{text}'
+    )
+    openrouter_url = getattr(settings, 'OPENROUTER_API_URL', '')
+    openrouter_api_key = getattr(settings, 'OPENROUTER_API_KEY', '')
+    openrouter_model_name = getattr(settings, 'OPENROUTER_MODEL_NAME', 'qwen-2.5-mini')
+    ollama_url = getattr(settings, 'OLLAMA_API_URL', 'http://localhost:11434/api/generate')
+    ollama_model_name = getattr(settings, 'OLLAMA_MODEL_NAME', 'qwen2.5:7b')
+    max_tokens = min(4096, max(256, len(text) * 2))
+
+    if openrouter_api_key:
+        try:
+            response = requests.post(
+                openrouter_url,
+                json={
+                    'model': openrouter_model_name,
+                    'messages': [{'role': 'user', 'content': prompt}],
+                    'temperature': 0.1,
+                    'max_tokens': max_tokens,
+                },
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {openrouter_api_key}',
+                },
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            content = response.json()['choices'][0]['message']['content']
+            if isinstance(content, dict):
+                content = content.get('text')
+            if not isinstance(content, str) or not content.strip():
+                raise SummarizationError('Translation service returned an empty result.')
+            return content.strip()
+        except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as exc:
+            logger.exception('OpenRouter conversation translation failed')
+            raise SummarizationError(f'Translation service unavailable: {exc}') from exc
+
+    try:
+        response = requests.post(
+            ollama_url,
+            json={
+                'model': ollama_model_name,
+                'prompt': prompt,
+                'stream': False,
+                'options': {'temperature': 0.1, 'num_predict': max_tokens},
+            },
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        translated = response.json().get('response')
+    except (requests.RequestException, ValueError, AttributeError) as exc:
+        logger.exception('Ollama conversation translation failed')
+        raise SummarizationError(f'Translation service unavailable: {exc}') from exc
+
+    if not isinstance(translated, str) or not translated.strip():
+        raise SummarizationError('Translation service returned an empty result.')
+    return translated.strip()
+
+
+def localize_conversation_content(conversation, target_language, include_transcript=True):
+    target_language = (target_language or 'English').strip() or 'English'
+    source_language = (conversation.content_language or 'English').strip() or 'English'
+    original_transcript = conversation.transcript or ''
+    original_summary = conversation.summary or ''
+    if target_language == source_language:
+        return {
+            'transcript': original_transcript,
+            'summary': original_summary,
+            'translation_error': None,
+        }
+
+    localized = conversation.localized_content if isinstance(conversation.localized_content, dict) else {}
+    cached = localized.get(target_language, {})
+    cached = cached if isinstance(cached, dict) else {}
+    translated = dict(cached)
+    translation_errors = []
+
+    for field, original in (
+        ('summary', original_summary),
+        ('transcript', original_transcript if include_transcript else ''),
+    ):
+        if field in translated or not original:
+            continue
+        try:
+            translated[field] = translate_conversation_text(original, target_language)
+        except SummarizationError as exc:
+            translation_errors.append(str(exc))
+
+    if translated != cached:
+        localized = dict(localized)
+        localized[target_language] = translated
+        conversation.localized_content = localized
+        conversation.save(update_fields=['localized_content'])
+
+    return {
+        'transcript': translated.get('transcript', original_transcript),
+        'summary': translated.get('summary', original_summary),
+        'translation_error': '; '.join(translation_errors) or None,
+    }
+
+
 def process_saved_conversation(conversation_id, transcriber=None, summarizer=None, target_language='English'):
     """Transcribe and summarize a saved audio conversation in the background.
 

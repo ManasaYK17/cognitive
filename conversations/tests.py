@@ -44,13 +44,17 @@ class ConversationSummarizeTests(APITestCase):
                 'patient_id': self.patient.id,
                 'known_person_id': self.known_person.id,
                 'device_id': self.device_id,
+                'language': 'Kannada',
             },
             format='multipart',
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['summary'], 'A brief summary of the conversation.')
-        self.assertTrue(ConversationHistory.objects.filter(patient=self.patient, known_person=self.known_person, summary__icontains='brief summary').exists())
+        conversation = ConversationHistory.objects.get(patient=self.patient, known_person=self.known_person)
+        self.assertIn('brief summary', conversation.summary)
+        self.assertEqual(conversation.content_language, 'Kannada')
+        self.assertEqual(mock_summarize.call_args.kwargs['target_language'], 'Kannada')
 
     @patch('conversations.views.summarize_transcript')
     @patch('conversations.views.transcribe_audio')

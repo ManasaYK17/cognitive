@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'theme/design_tokens.dart';
 import 'services/api_client.dart';
@@ -116,6 +117,11 @@ class _CognitiveAssistAppState extends State<CognitiveAssistApp> with WidgetsBin
           navigatorKey: NotificationService.navigatorKey,
           locale: appLanguage.locale,
           supportedLocales: AppLanguage.supportedLocales,
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+          ],
           theme: DesignTokens.darkTheme(),
           darkTheme: DesignTokens.darkTheme(),
           themeMode: ThemeMode.dark,

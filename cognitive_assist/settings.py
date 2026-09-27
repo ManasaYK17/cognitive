@@ -132,11 +132,10 @@ RECOGNITION_CONFIDENCE_THRESHOLD = 0.5
 # not just clear the threshold above -- otherwise two similar-looking
 # people can produce near-tied scores and get confidently mismatched.
 RECOGNITION_MATCH_MARGIN = 0.1
-# Automatic phone scans use the same calibrated floor as the general
-# recognition flow. The lightweight fallback encoder has a wider score range
-# across handset captures, so the winner margin remains the primary guard
-# against ambiguous matches.
-RECOGNITION_PHONE_AUTO_THRESHOLD = 0.8
+# Phone-camera captures score lower than enrollment images with the handset
+# fallback encoder. Keep a conservative floor and rely on the winner margin
+# to reject ambiguous candidates.
+RECOGNITION_PHONE_AUTO_THRESHOLD = 0.65
 RECOGNITION_PHONE_AUTO_MATCH_MARGIN = 0.15
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL_NAME = os.environ.get('OLLAMA_MODEL_NAME', 'qwen2.5:7b')

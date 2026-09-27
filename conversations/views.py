@@ -20,6 +20,7 @@ from .services import (
     transcribe_audio,
     transcribe_audio_high_pass,
     summarize_transcript,
+    localize_conversation_content,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ class ConversationSummarizeView(views.APIView):
         patient_id = request.data.get('patient_id')
         known_person_id = request.data.get('known_person_id')
         target_language = request.data.get('language') or 'English'
+        target_language = target_language.strip() or 'English'
 
         if not audio:
             return Response({'detail': 'An audio file is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -76,6 +78,7 @@ class ConversationSummarizeView(views.APIView):
             known_person=known_person,
             transcript='',
             summary='',
+            content_language=target_language,
             audio_file=audio,
         )
         from cognitive_features.events import CONVERSATION_UPDATED, publish_patient_event

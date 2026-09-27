@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from .models import RecognitionHistory
 from .serializers import HistoryFeedSerializer, PatientHistorySummarySerializer, RecognitionHistorySerializer
 from conversations.models import ConversationHistory
+from conversations.services import localize_conversation_content
 from known_people.models import KnownPerson
 
 
@@ -120,19 +121,19 @@ class PatientHistoryView(APIView):
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         known_person_id = request.query_params.get('known_person_id')
+        target_language = request.query_params.get('language') or 'English'
+        summary_only = request.query_params.get('summary_only') == 'true'
         history_qs = ConversationHistory.objects.filter(patient_id=patient_id)
         if known_person_id:
             history_qs = history_qs.filter(known_person_id=known_person_id).order_by('-created_at')
+            limit = request.query_params.get('limit')
+            if limit:
+                try:
+                    history_qs = history_qs[:max(1, min(int(limit), 100))]
+                except (TypeError, ValueError):
+                    pass
             response_data = [
-                {
-                    'id': item.id,
-                    'known_person_id': item.known_person_id,
-                    'known_person_name': item.known_person.name,
-                    'summary': item.summary,
-                    'transcript': item.transcript,
-                    'error_message': item.error_message,
-                    'created_at': item.created_at,
-                }
+                self._serialize_conversation(item, target_language, include_transcript=not summary_only)
                 for item in history_qs
             ]
             return Response(response_data)
@@ -142,15 +143,42 @@ class PatientHistoryView(APIView):
         for item in history_qs:
             kp_id = item.known_person_id
             if kp_id not in latest_by_person:
-                latest_by_person[kp_id] = {
-                    'known_person_id': kp_id,
-                    'known_person_name': item.known_person.name,
-                    'last_summary': item.summary,
-                    'last_summary_at': item.created_at,
-                }
+                latest_by_person[kp_id] = item
 
-        serializer = PatientHistorySummarySerializer(list(latest_by_person.values()), many=True)
+        latest_items = list(latest_by_person.values())
+        limit = request.query_params.get('limit')
+        if limit:
+            try:
+                latest_items = latest_items[:max(1, min(int(limit), 100))]
+            except (TypeError, ValueError):
+                pass
+
+        response_data = []
+        for item in latest_items:
+            localized = localize_conversation_content(item, target_language, include_transcript=False)
+            response_data.append({
+                'known_person_id': item.known_person_id,
+                'known_person_name': item.known_person.name,
+                'last_summary': localized['summary'],
+                'last_summary_at': item.created_at,
+                'translation_error': localized['translation_error'],
+            })
+
+        serializer = PatientHistorySummarySerializer(response_data, many=True)
         return Response(serializer.data)
+
+    @staticmethod
+    def _serialize_conversation(item, target_language, include_transcript=True):
+        localized = localize_conversation_content(item, target_language, include_transcript=include_transcript)
+        return {
+            'id': item.id,
+            'known_person_id': item.known_person_id,
+            'known_person_name': item.known_person.name,
+            'summary': localized['summary'],
+            'transcript': localized['transcript'],
+            'error_message': item.error_message or localized['translation_error'],
+            'created_at': item.created_at,
+        }
 
 class PatientRecognitionView(APIView):
     authentication_classes = []

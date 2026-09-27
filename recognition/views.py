@@ -304,11 +304,15 @@ class IdentifyKnownPersonView(views.APIView):
 
     @staticmethod
     def _get_or_create_unknown_person(patient):
-        return KnownPerson.objects.get_or_create(
+        unknown_person, _created = KnownPerson.objects.get_or_create(
             patient=patient,
             name='Unknown',
-            defaults={'relationship': 'Unknown'},
-        )[0]
+            defaults={'relationship': 'None'},
+        )
+        if unknown_person.relationship != 'None':
+            unknown_person.relationship = 'None'
+            unknown_person.save(update_fields=['relationship', 'updated_at'])
+        return unknown_person
 
     @staticmethod
     def _ensure_face_encodings(subject):
@@ -559,10 +563,9 @@ class IdentifyKnownPersonView(views.APIView):
             eff_margin = min(match_margin, getattr(settings, 'RECOGNITION_HARDWARE_MATCH_MARGIN', 0.05))
         elif phone_source:
             # The phone currently uses the lightweight LBP fallback when the
-            # production face-recognition backends are unavailable. Its raw
-            # cosine scores are not identity-safe at the normal threshold, so
-            # automatic scans must use a stricter fail-closed calibration.
-            eff_threshold = getattr(settings, 'RECOGNITION_PHONE_AUTO_THRESHOLD', 0.9)
+            # production face-recognition backends are unavailable. Use a
+            # conservative handset floor and keep the larger winner margin.
+            eff_threshold = getattr(settings, 'RECOGNITION_PHONE_AUTO_THRESHOLD', 0.65)
             eff_margin = getattr(settings, 'RECOGNITION_PHONE_AUTO_MATCH_MARGIN', 0.15)
         else:
             eff_threshold = threshold
@@ -587,7 +590,7 @@ class IdentifyKnownPersonView(views.APIView):
 
         source_value = request.data.get('source', 'phone_camera')
         unknown_person = None
-        if not matched and source_value == 'specs_hardware':
+        if not matched:
             unknown_person = self._get_or_create_unknown_person(patient)
             best_known_person = unknown_person
 
@@ -661,7 +664,7 @@ class IdentifyKnownPersonView(views.APIView):
         logger.info('recognition_timing total elapsed_ms=%.1f matched=%s confidence=%.4f', (time.perf_counter() - request_started_at) * 1000, matched, best_confidence)
         response_name = best_known_person.name if matched and best_known_person is not None else None
         response_id = best_known_person.id if matched and best_known_person is not None else None
-        if not matched and source_value == 'specs_hardware':
+        if not matched:
             response_name = 'Unknown'
             response_id = unknown_person.id if unknown_person is not None else None
         return Response({
@@ -669,7 +672,7 @@ class IdentifyKnownPersonView(views.APIView):
             'confidence': round(best_confidence, 4),
             'id': response_id,
             'name': response_name,
-            'relationship': best_known_person.relationship if matched and best_known_person is not None else None,
+            'relationship': best_known_person.relationship if matched and best_known_person is not None else 'None',
             'patient_id': patient.id,
             'last_summary': last_summary,
         }, status=status.HTTP_200_OK)

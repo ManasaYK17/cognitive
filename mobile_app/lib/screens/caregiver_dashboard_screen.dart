@@ -737,7 +737,14 @@ class _CaregiverDashboardScreenState extends State<CaregiverDashboardScreen> {
       children: [
         Container(width: 12, height: 12, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(999))),
         const SizedBox(width: 10),
-        Text('$label — ${percent.toStringAsFixed(0)}%', style: const TextStyle(color: Colors.white70, fontSize: 14)),
+        Flexible(
+          child: Text(
+            '$label — ${percent.toStringAsFixed(0)}%',
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }

@@ -31,6 +31,7 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
     final response = await _api.get('/known-people/', token: token, params: {
       'patient': widget.patientId.toString(),
     });
+    if (!mounted) return;
     if (response.statusCode == 200) {
       setState(() {
         _knownPeople = json.decode(response.body) as List<dynamic>;

@@ -4,13 +4,19 @@ from .models import GameResult, Reminder
 
 class GameResultSerializer(serializers.ModelSerializer):
     accuracy = serializers.FloatField(read_only=True)
-    date = serializers.DateField(source='played_at', read_only=True)
-    time = serializers.TimeField(source='played_at', read_only=True)
+    date = serializers.SerializerMethodField()
+    time = serializers.SerializerMethodField()
 
     class Meta:
         model = GameResult
         fields = ['id', 'patient', 'game_name', 'score', 'correct_answers', 'total_questions', 'accuracy', 'played_at', 'date', 'time']
         read_only_fields = fields
+
+    def get_date(self, obj):
+        return obj.played_at.date()
+
+    def get_time(self, obj):
+        return obj.played_at.time()
 
 
 class GameResultCreateSerializer(serializers.ModelSerializer):

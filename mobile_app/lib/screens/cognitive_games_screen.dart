@@ -1,4 +1,6 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../services/app_language.dart';
 import '../services/cognitive_features_service.dart';
 
 const _games = <Map<String, dynamic>>[
@@ -7,6 +9,38 @@ const _games = <Map<String, dynamic>>[
   {'name': 'Missing Card Memory', 'icon': Icons.grid_on_rounded, 'color': Colors.deepOrange},
   {'name': 'Daily Routine Recall', 'icon': Icons.event_note, 'color': Colors.pink},
 ];
+
+const _missingCardDistractors = ['🍌', '⚽', '🐟'];
+
+const _gameNameKeys = {
+  'Sequence Memory': 'game_sequence_memory',
+  'Image Matching': 'game_image_matching',
+  'Missing Card Memory': 'game_missing_card_memory',
+  'Daily Routine Recall': 'game_daily_routine_recall',
+};
+
+const _routineActivityKeys = {
+  'Wake Up': 'routine_wake_up',
+  'Brush': 'routine_brush',
+  'Breakfast': 'routine_breakfast',
+  'Medicine': 'routine_medicine',
+  'Walk': 'routine_walk',
+  'Rest': 'routine_rest',
+};
+
+String _translateGameText(String key, {Map<String, String> values = const {}}) {
+  var text = AppLanguage().translate(key);
+  for (final entry in values.entries) {
+    text = text.replaceAll('{${entry.key}}', entry.value);
+  }
+  return text;
+}
+
+String _localizedGameName(String name) =>
+    _translateGameText(_gameNameKeys[name] ?? 'game_unavailable');
+
+String _localizedRoutineActivity(String activity) =>
+    _translateGameText(_routineActivityKeys[activity] ?? activity);
 
 class CognitiveGamesScreen extends StatelessWidget {
   final int patientId;
@@ -26,7 +60,7 @@ class CognitiveGamesScreen extends StatelessWidget {
         crossAxisCount: 2,
         crossAxisSpacing: 16,
         mainAxisSpacing: 16,
-        childAspectRatio: 1.05,
+        childAspectRatio: 0.82,
       ),
       itemCount: _games.length,
       itemBuilder: (context, index) {
@@ -48,21 +82,19 @@ class CognitiveGamesScreen extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Icon(game['icon'] as IconData, size: 42, color: Colors.white),
-                  const SizedBox(height: 12),
+                  Icon(game['icon'] as IconData, size: 32, color: Colors.white),
+                  const SizedBox(height: 8),
                   Text(
-                    game['name'] as String,
+                    _localizedGameName(game['name'] as String),
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white),
                   ),
                 ],
               ),
@@ -106,14 +138,16 @@ class _MemoryCard {
 
 class _RoutineQuestion {
   const _RoutineQuestion({
-    required this.question,
+    required this.questionKey,
     required this.options,
     required this.answer,
+    this.activity,
   });
 
-  final String question;
+  final String questionKey;
   final List<String> options;
   final String answer;
+  final String? activity;
 }
 
 class _GamePlayScreenState extends State<GamePlayScreen> {
@@ -122,10 +156,12 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   bool _loading = true;
   bool _finished = false;
   bool _gameStarted = false;
+  bool _savingResult = false;
+  bool _scoreSaved = false;
+  String? _scoreSaveError;
   int _difficultyLevel = 1;
   int _correctAnswers = 0;
   int _incorrectAnswers = 0;
-  int _wrongSelections = 0;
   int _totalAttempts = 0;
   int _questionIndex = 0;
 
@@ -150,7 +186,6 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   List<_MemoryCard> _missingCards = const [];
   int _missingCardPosition = -1;
   List<String> _missingChoices = const [];
-  int _missingAttempts = 0;
 
   List<String> _routineActivities = const [];
   List<_RoutineQuestion> _routineQuestions = const [];
@@ -204,17 +239,17 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   }
 
   void _setupGame(int level) {
+    if (!mounted) return;
     _difficultyLevel = level;
     _correctAnswers = 0;
     _incorrectAnswers = 0;
-    _wrongSelections = 0;
     _totalAttempts = 0;
     _questionIndex = 0;
     _feedbackMessage = null;
 
     switch (widget.gameName) {
       case 'Sequence Memory':
-        _buildSequenceGame(level);
+        _buildSequenceGame();
         break;
       case 'Image Matching':
         _buildImageMatchingGame(level);
@@ -234,9 +269,9 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
     });
   }
 
-  void _buildSequenceGame(int level) {
-    final gridSize = level >= 4 ? 4 : 3;
-    final totalCards = gridSize * gridSize;
+  void _buildSequenceGame() {
+    const totalCards = 9;
+    const gridSize = 3;
     final values = List<int>.generate(totalCards, (index) => index + 1)..shuffle();
 
     _sequenceCards = List<_MemoryCard>.generate(
@@ -299,19 +334,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
 
     _missingCards = cards;
     _missingCardPosition = 4;
-    _missingChoices = [
-      imagePool[0],
-      imagePool[1],
-      imagePool[2],
-      imagePool[3],
-    ];
-
     final missingValue = imagePool[_missingCardPosition];
-    _missingChoices = _missingChoices.toSet().toList()..shuffle();
-    if (!_missingChoices.contains(missingValue)) {
-      _missingChoices[0] = missingValue;
-    }
-    _missingChoices = _missingChoices.take(4).toList()..shuffle();
+    _missingChoices = [missingValue, ..._missingCardDistractors]..shuffle();
   }
 
   void _buildRoutineGame(int level) {
@@ -335,7 +359,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
 
     _routineQuestions = [
       _RoutineQuestion(
-        question: 'What comes after ${_routineActivities[1]}?',
+        questionKey: 'routine_after',
+        activity: _routineActivities[1],
         options: _routineActivities.length > 2
             ? [
                 _routineActivities[2],
@@ -346,18 +371,19 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         answer: _routineActivities[2],
       ),
       _RoutineQuestion(
-        question: 'What comes before ${_routineActivities[2]}?',
+        questionKey: 'routine_before',
+        activity: _routineActivities[2],
         options: _routineActivities.length > 2
             ? [
                 _routineActivities[1],
-                _routineActivities[3],
+                _routineActivities.length > 3 ? _routineActivities[3] : _routineActivities[2],
                 _routineActivities[0],
               ]
             : const [],
         answer: _routineActivities[1],
       ),
       _RoutineQuestion(
-        question: 'What is the first activity?',
+        questionKey: 'routine_first',
         options: _routineActivities
             .map((item) => item)
             .toList()
@@ -374,12 +400,23 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   }
 
   Future<void> _finishSession() async {
-    final totalQuestions = _getTotalQuestions();
-    final safeCorrectAnswers = _correctAnswers.clamp(0, totalQuestions);
-    final score = _calculateScore(safeCorrectAnswers, totalQuestions);
+    if (_finished) return;
 
     setState(() {
       _finished = true;
+    });
+    await _saveResult();
+  }
+
+  Future<void> _saveResult() async {
+    if (_savingResult) return;
+    final totalAttempts = _totalAttempts > _correctAnswers ? _totalAttempts : _correctAnswers;
+    final denominator = totalAttempts > 0 ? totalAttempts : 1;
+    final safeCorrectAnswers = _correctAnswers.clamp(0, denominator);
+    final score = _calculateScore(safeCorrectAnswers, denominator);
+    setState(() {
+      _savingResult = true;
+      _scoreSaveError = null;
     });
 
     try {
@@ -387,23 +424,15 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         'game_name': widget.gameName,
         'score': score,
         'correct_answers': safeCorrectAnswers,
-        'total_questions': totalQuestions,
+        'total_questions': denominator,
       });
-    } catch (_) {}
-  }
-
-  int _getTotalQuestions() {
-    switch (widget.gameName) {
-      case 'Sequence Memory':
-        return _sequenceCards.length;
-      case 'Image Matching':
-        return _matchingPairs.length;
-      case 'Missing Card Memory':
-        return 1;
-      case 'Daily Routine Recall':
-        return _routineQuestions.length;
-      default:
-        return 1;
+      if (!mounted) return;
+      setState(() => _scoreSaved = true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _scoreSaveError = 'Could not send this result to your caregiver. Check the connection and retry.');
+    } finally {
+      if (mounted) setState(() => _savingResult = false);
     }
   }
 
@@ -429,8 +458,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         _correctAnswers++;
         _sequenceTarget++;
         _feedbackMessage = _sequenceTarget <= _sequenceCards.length
-            ? 'Find ${_sequenceTarget}'
-            : 'Sequence Completed!';
+          ? _translateGameText('sequence_find', values: {'number': '$_sequenceTarget'})
+          : _translateGameText('sequence_completed');
       });
 
       if (_sequenceTarget > _sequenceCards.length) {
@@ -441,8 +470,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
 
     setState(() {
       _incorrectAnswers++;
-      _wrongSelections++;
-      _feedbackMessage = 'Try again';
+      _feedbackMessage = _translateGameText('game_try_again');
     });
   }
 
@@ -480,7 +508,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
         firstCard.matched = true;
         secondCard.matched = true;
         _correctAnswers++;
-        _feedbackMessage = 'Match!';
+        _feedbackMessage = _translateGameText('image_match');
       });
 
       if (_correctAnswers >= _matchingPairs.length) {
@@ -490,8 +518,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
     } else {
       setState(() {
         _incorrectAnswers++;
-        _wrongSelections++;
-        _feedbackMessage = 'Not a match';
+        _feedbackMessage = _translateGameText('image_not_match');
       });
     }
 
@@ -508,7 +535,9 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       }
       _selectedImageIndices = [];
       _imageSelectionLocked = false;
-      _feedbackMessage = matched ? 'Great job!' : 'Try again';
+        _feedbackMessage = matched
+          ? _translateGameText('game_great_job')
+          : _translateGameText('game_try_again');
     });
   }
 
@@ -517,13 +546,13 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       return;
     }
 
-    _missingAttempts++;
+    _totalAttempts++;
     final missingValue = _missingCards[_missingCardPosition].value;
 
     if (choice == missingValue) {
       setState(() {
         _correctAnswers++;
-        _feedbackMessage = 'Correct!';
+        _feedbackMessage = _translateGameText('game_correct');
       });
       _finishSession();
       return;
@@ -531,8 +560,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
 
     setState(() {
       _incorrectAnswers++;
-      _wrongSelections++;
-      _feedbackMessage = 'Try again';
+      _feedbackMessage = _translateGameText('game_try_again');
     });
   }
 
@@ -547,17 +575,17 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       _totalAttempts++;
       if (answer == currentQuestion.answer) {
         _correctAnswers++;
-        _feedbackMessage = 'Correct!';
+        _feedbackMessage = _translateGameText('game_correct');
       } else {
         _incorrectAnswers++;
-        _feedbackMessage = 'Not quite';
+        _feedbackMessage = _translateGameText('routine_not_quite');
       }
     });
 
     if (_questionIndex < _routineQuestions.length - 1) {
       setState(() {
         _questionIndex++;
-        _feedbackMessage = 'Next question';
+        _feedbackMessage = _translateGameText('routine_next_question');
       });
       return;
     }
@@ -567,25 +595,27 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Provider.of<AppLanguage>(context);
+    final gameTitle = _localizedGameName(widget.gameName);
     if (_loading) {
       return Scaffold(
-        appBar: AppBar(title: Text(widget.gameName)),
+        appBar: AppBar(title: Text(gameTitle)),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_finished) {
-      final totalQuestions = _getTotalQuestions();
-      final accuracy = totalQuestions == 0 ? 0.0 : (_correctAnswers / totalQuestions) * 100;
+      final totalAttempts = _totalAttempts > _correctAnswers ? _totalAttempts : _correctAnswers;
+      final accuracy = totalAttempts == 0 ? 0.0 : (_correctAnswers / totalAttempts) * 100;
 
       return Scaffold(
-        appBar: AppBar(title: Text(widget.gameName)),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+        appBar: AppBar(title: Text(gameTitle)),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
             child: Card(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(20),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -593,41 +623,58 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                     const Icon(Icons.check_circle, size: 80, color: Colors.green),
                     const SizedBox(height: 20),
                     Text(
-                      'Game completed',
+                      _translateGameText('game_completed'),
                       style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 20),
                     Text(
-                      'Game: ${widget.gameName}',
+                      _translateGameText('game_label', values: {'game': gameTitle}),
                       style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Accuracy: ${accuracy.toStringAsFixed(0)}%',
+                      _translateGameText('accuracy_label', values: {'accuracy': accuracy.toStringAsFixed(0)}),
                       style: const TextStyle(fontSize: 20),
                     ),
                     Text(
-                      'Correct: $_correctAnswers/$totalQuestions',
+                      _translateGameText('correct_attempts_label', values: {
+                        'correct': '$_correctAnswers',
+                        'attempts': '$totalAttempts',
+                      }),
                       style: const TextStyle(fontSize: 20),
                     ),
                     Text(
-                      'Errors: $_incorrectAnswers',
+                      _translateGameText('errors_label', values: {'errors': '$_incorrectAnswers'}),
                       style: const TextStyle(fontSize: 20),
                     ),
                     Text(
-                      'Attempts: $_totalAttempts',
+                      _translateGameText('attempts_label', values: {'attempts': '$_totalAttempts'}),
                       style: const TextStyle(fontSize: 20),
                     ),
                     Text(
-                      'Difficulty: Level $_difficultyLevel',
+                      _translateGameText('difficulty_label', values: {'level': '$_difficultyLevel'}),
                       style: const TextStyle(fontSize: 20),
                     ),
+                    if (_savingResult) ...[
+                      const SizedBox(height: 12),
+                      const CircularProgressIndicator(),
+                      const SizedBox(height: 8),
+                      Text(_translateGameText('sending_result')),
+                    ] else if (_scoreSaveError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(_translateGameText('score_save_failed'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(onPressed: _saveResult, icon: const Icon(Icons.refresh), label: Text(_translateGameText('retry'))),
+                    ] else if (_scoreSaved) ...[
+                      const SizedBox(height: 12),
+                      Text(_translateGameText('result_sent')),
+                    ],
                     const SizedBox(height: 28),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Back to games', style: TextStyle(fontSize: 20)),
+                        child: Text(_translateGameText('back_to_games'), style: const TextStyle(fontSize: 20)),
                       ),
                     ),
                   ],
@@ -659,7 +706,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
       case 'Daily Routine Recall':
         return _gameStarted ? _buildRoutinePlayCard() : _buildRoutineObservationCard();
       default:
-        return const Center(child: Text('Game unavailable'));
+        return Center(child: Text(_translateGameText('game_unavailable')));
     }
   }
 
@@ -673,7 +720,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Remember where each number is located.\nOpen the numbers in order from 1 to ${_sequenceCards.length}.',
+                _translateGameText('sequence_observe', values: {'number': '${_sequenceCards.length}'}),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
@@ -684,7 +731,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                 height: 72,
                 child: ElevatedButton(
                   onPressed: _startGame,
-                  child: const Text('START', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                  child: Text(_translateGameText('game_start'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -704,7 +751,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Find ${_sequenceTarget}',
+                _translateGameText('sequence_find', values: {'number': '$_sequenceTarget'}),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
@@ -768,8 +815,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Remember the card locations and the matching pairs.',
+                Text(
+                  _translateGameText('image_observe'),
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
@@ -780,7 +827,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                 height: 72,
                 child: ElevatedButton(
                   onPressed: _startGame,
-                  child: const Text('START', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                  child: Text(_translateGameText('game_start'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -793,14 +840,14 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   Widget _buildImageMatchingPlayCard() {
     return Center(
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Open one card, then another card.',
+              Text(
+                _translateGameText('image_open_pair'),
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
@@ -856,14 +903,14 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   Widget _buildMissingCardObservationCard() {
     return Center(
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Remember all the cards.\nOne card will be missing.',
+              Text(
+                _translateGameText('missing_observe'),
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
@@ -874,7 +921,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                 height: 72,
                 child: ElevatedButton(
                   onPressed: _startGame,
-                  child: const Text('START', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                  child: Text(_translateGameText('game_start'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -887,14 +934,14 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
   Widget _buildMissingCardPlayCard() {
     return Center(
       child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Which card is missing?',
+              Text(
+                _translateGameText('missing_question'),
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
@@ -969,8 +1016,8 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Observe the routine below carefully.',
+              Text(
+                _translateGameText('routine_observe'),
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
@@ -982,7 +1029,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          '${index + 1}. ${_routineActivities[index]}',
+                          '${index + 1}. ${_localizedRoutineActivity(_routineActivities[index])}',
                           style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w500),
                         ),
                       ],
@@ -994,7 +1041,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                 height: 72,
                 child: ElevatedButton(
                   onPressed: _startGame,
-                  child: const Text('START', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                  child: Text(_translateGameText('game_start'), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                 ),
               ),
             ],
@@ -1006,6 +1053,9 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
 
   Widget _buildRoutinePlayCard() {
     final currentQuestion = _routineQuestions[_questionIndex];
+    final questionValues = currentQuestion.activity == null
+        ? const <String, String>{}
+        : {'activity': _localizedRoutineActivity(currentQuestion.activity!)};
 
     return Center(
       child: Card(
@@ -1016,7 +1066,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                currentQuestion.question,
+                _translateGameText(currentQuestion.questionKey, values: questionValues),
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
@@ -1035,7 +1085,7 @@ class _GamePlayScreenState extends State<GamePlayScreen> {
                     height: 58,
                     child: ElevatedButton(
                       onPressed: () => _onRoutineAnswer(option),
-                      child: Text(option, style: const TextStyle(fontSize: 20)),
+                      child: Text(_localizedRoutineActivity(option), style: const TextStyle(fontSize: 20)),
                     ),
                   ),
                 ),

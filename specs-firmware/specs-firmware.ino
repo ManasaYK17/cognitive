@@ -6,6 +6,8 @@
 #include <SD.h>
 #include <WebServer.h>
 #include "esp_camera.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "camera_pins.h"
 #include "secrets.h"
 
@@ -74,9 +76,8 @@ constexpr float kSilenceDutyCycleThreshold = 10.0f;
 // ...sustained continuously for this long to end the recording. Placeholder
 // value for testing -- real 30s/45-60s tuning later.
 constexpr uint32_t kSilenceTimeoutMsPlaceholder = 10000;
-// Placeholder -- real ~60s value comes later once the full identify-then-act
-// flow is decided. Same pattern as kSilenceTimeoutMsPlaceholder above.
-constexpr uint32_t kIdentifyDelayMsPlaceholder = 15000;
+constexpr uint32_t kIdentifyDelayAfterRecordingMs = 0;
+constexpr uint32_t kPostMatchRecordingMs = 10000;
 // HTTPClient's default (HTTPCLIENT_DEFAULT_TCP_TIMEOUT, HTTPClient.h) is
 // only 5000ms -- an inactivity timeout on waiting for the server's
 // response, confirmed too short for postConversationAudio(): uploading a
@@ -104,6 +105,22 @@ uint32_t voiceActivityStartedAt = 0;  // 0 = not currently tracking a sustained-
 uint32_t silenceStartedAt = 0;        // 0 = not currently tracking a sustained-quiet run
 bool identifyAttempted = false;       // per-RECORDING-session latch, reset in enterRecording()
 bool lastIdentifyMatch = false;
+bool identifyInProgress = false;
+bool matchCountdownActive = false;
+uint32_t identifyMatchFoundAtMs = 0;
+TaskHandle_t mainLoopTaskHandle = nullptr;
+TaskHandle_t identifyTaskHandle = nullptr;
+struct IdentifyTaskResult {
+  bool match;
+  long knownPersonId;
+  long patientId;
+  String name;
+  String relationship;
+  String summary;
+  uint8_t *imageBytes;
+  size_t imageLength;
+};
+IdentifyTaskResult pendingIdentifyResult = {};
 String lastIdentifyName;
 String lastIdentifyRelationship;
 String lastIdentifySummary;
@@ -334,6 +351,31 @@ bool identifyKnownPerson(camera_fb_t *fb, String &outName, String &outRelationsh
   outKnownPersonId = knownPersonId;
   outPatientId = patientId;
   return match;
+}
+
+void identifyPersonTask(void *parameter) {
+  (void)parameter;
+  IdentifyTaskResult result = {};
+  camera_fb_t *fb = captureFrameViaReinit();
+  if (fb) {
+    result.imageBytes = psramFound() ? (uint8_t *)ps_malloc(fb->len) : (uint8_t *)malloc(fb->len);
+    if (result.imageBytes) {
+      memcpy(result.imageBytes, fb->buf, fb->len);
+      result.imageLength = fb->len;
+    } else {
+      Serial.println("[IDENTIFY] Failed to allocate buffer to hold captured image.");
+    }
+    result.match = identifyKnownPerson(fb, result.name, result.relationship, result.summary,
+                                       result.knownPersonId, result.patientId);
+    esp_camera_fb_return(fb);
+  } else {
+    Serial.println("[IDENTIFY] capture failed (even after deinit/reinit).");
+  }
+  esp_camera_deinit();
+
+  pendingIdentifyResult = result;
+  xTaskNotifyGive(mainLoopTaskHandle);
+  vTaskDelete(nullptr);
 }
 
 // Concatenates a small in-memory preamble, a File's contents, and a small
@@ -773,6 +815,11 @@ void enterRecording() {
   recordingChunkCount = 0;
   recordingSessionStartedAtMs = millis();
   identifyAttempted = false;
+  identifyInProgress = false;
+  matchCountdownActive = false;
+  identifyMatchFoundAtMs = 0;
+  identifyTaskHandle = nullptr;
+  pendingIdentifyResult = {};
   // Reset every session so a failed/skipped identify attempt this session
   // can never fall back to a stale result from a previous one when
   // exitRecording() decides which backend upload path to take.
@@ -904,6 +951,7 @@ void handleStatus() {
 
 void setup() {
   Serial.begin(115200);
+  mainLoopTaskHandle = xTaskGetCurrentTaskHandle();
 
   // Native USB CDC on this board: give the host time to finish
   // re-enumerating after reset/power-on, or early prints get lost.
@@ -983,6 +1031,31 @@ void loop() {
 
   server.handleClient();
 
+  if (identifyTaskHandle != nullptr && ulTaskNotifyTake(pdTRUE, 0) > 0) {
+    identifyTaskHandle = nullptr;
+    identifyInProgress = false;
+    lastIdentifyMatch = pendingIdentifyResult.match;
+    lastIdentifyName = pendingIdentifyResult.name;
+    lastIdentifyRelationship = pendingIdentifyResult.relationship;
+    lastIdentifySummary = pendingIdentifyResult.summary;
+    lastIdentifyKnownPersonId = pendingIdentifyResult.knownPersonId;
+    lastIdentifyPatientId = pendingIdentifyResult.patientId;
+    heldIdentifyImageBytes = pendingIdentifyResult.imageBytes;
+    heldIdentifyImageLength = pendingIdentifyResult.imageLength;
+    pendingIdentifyResult.imageBytes = nullptr;
+    pendingIdentifyResult.imageLength = 0;
+
+    if (lastIdentifyMatch) {
+      identifyMatchFoundAtMs = millis();
+      matchCountdownActive = true;
+      Serial.printf("[IDENTIFY] match confirmed; recording will stop in %lums\n",
+                    (unsigned long)kPostMatchRecordingMs);
+    } else {
+      Serial.println("[IDENTIFY] result: match=false (no known person identified)");
+    }
+    now = millis();
+  }
+
   // No camera capture here -- that's a separate, later step. This loop is
   // purely: drain the mic continuously (both states need it), track the
   // rolling duty cycle, and transition LISTENING <-> RECORDING.
@@ -1009,51 +1082,25 @@ void loop() {
     }
   } else {  // AppState::RECORDING
     if (!identifyAttempted && cameraReady &&
-        (now - recordingSessionStartedAtMs) >= kIdentifyDelayMsPlaceholder) {
-      identifyAttempted = true;  // set before attempting -- never retry this session either way
-      Serial.printf("[IDENTIFY] Firing mid-session capture at +%lums into recording\n",
-                    (unsigned long)(now - recordingSessionStartedAtMs));
-      // Deinit+reinit immediately before capturing, not a direct
-      // esp_camera_fb_get() call -- confirmed necessary: mic is actively
-      // running at this point (deep into RECORDING), the one condition that
-      // reliably breaks a direct capture. Mic and SD are never touched by
-      // this.
-      camera_fb_t *fb = captureFrameViaReinit();
-      if (fb) {
-        // Copy the JPEG out before returning the frame buffer / deiniting
-        // the camera below -- fb won't survive until exitRecording(), but
-        // the no-match path there needs these bytes for create-from-encounter.
-        heldIdentifyImageBytes = psramFound() ? (uint8_t *)ps_malloc(fb->len) : (uint8_t *)malloc(fb->len);
-        if (heldIdentifyImageBytes) {
-          memcpy(heldIdentifyImageBytes, fb->buf, fb->len);
-          heldIdentifyImageLength = fb->len;
-        } else {
-          Serial.println("[IDENTIFY] Failed to allocate buffer to hold captured image for later upload.");
-          heldIdentifyImageLength = 0;
-        }
-
-        lastIdentifyMatch = identifyKnownPerson(fb, lastIdentifyName, lastIdentifyRelationship, lastIdentifySummary,
-                                                 lastIdentifyKnownPersonId, lastIdentifyPatientId);
-        esp_camera_fb_return(fb);
-        // The server still returns its best (non-matching) guess even when
-        // match=false, so printing name/relationship unconditionally here
-        // used to make every rejected/uncertain capture look like a wrong
-        // identification. Only show them on an actual match.
-        if (lastIdentifyMatch) {
-          Serial.printf("[IDENTIFY] result: match=true name=%s relationship=%s last_summary=%s\n",
-                        lastIdentifyName.c_str(), lastIdentifyRelationship.c_str(), lastIdentifySummary.c_str());
-        } else {
-          Serial.println("[IDENTIFY] result: match=false (no known person identified)");
-        }
-      } else {
-        Serial.println("[IDENTIFY] capture failed (even after deinit/reinit) -- no identify attempt made this session.");
+        (now - recordingSessionStartedAtMs) >= kIdentifyDelayAfterRecordingMs) {
+      identifyAttempted = true;
+      identifyInProgress = true;
+      Serial.println("[IDENTIFY] Starting face identification while audio recording continues.");
+      BaseType_t taskCreated = xTaskCreatePinnedToCore(
+          identifyPersonTask, "identifyPerson", 8192, nullptr, 1, &identifyTaskHandle, 0);
+      if (taskCreated != pdPASS) {
+        identifyTaskHandle = nullptr;
+        identifyInProgress = false;
+        Serial.println("[IDENTIFY] Failed to start identification task.");
       }
-      // Leave the camera dormant until actually needed again -- matches the
-      // audio-first "camera only active when needed" design intent.
-      esp_camera_deinit();
     }
 
-    if (dutyCyclePercent <= kSilenceDutyCycleThreshold) {
+    if (lastIdentifyMatch && matchCountdownActive) {
+      if (now - identifyMatchFoundAtMs >= kPostMatchRecordingMs) {
+        Serial.println("[RECORDING] Post-match capture window ended; closing and uploading conversation.");
+        exitRecording();
+      }
+    } else if (!identifyInProgress && dutyCyclePercent <= kSilenceDutyCycleThreshold) {
       if (silenceStartedAt == 0) silenceStartedAt = now;
       if (now - silenceStartedAt >= kSilenceTimeoutMsPlaceholder) {
         exitRecording();

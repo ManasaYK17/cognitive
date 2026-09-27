@@ -2,10 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:cognitive_assist_app/screens/reminder_alarm_screen.dart';
 
 void main() {
-  test('usage reminder is built with a clear patient-mode reminder message', () {
+  test('usage reminder is silent reminder data with the selected-language message', () {
     final reminder = ReminderAlarmScreen.buildUsageReminder();
 
     expect(reminder['type'], 'usage');
-    expect(reminder['message'], contains('still using'));
+    expect(reminder['message'], isNotEmpty);
   });
 }

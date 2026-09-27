@@ -46,3 +46,4 @@ class PatientHistorySummarySerializer(serializers.Serializer):
     known_person_name = serializers.CharField(read_only=True)
     last_summary = serializers.CharField(read_only=True, allow_null=True)
     last_summary_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    translation_error = serializers.CharField(read_only=True, allow_null=True)
