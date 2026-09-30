@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../services/realtime_event.dart';
+import '../widgets/image_avatar.dart';
 
 class HistoryDashboardScreen extends StatefulWidget {
   final int? patientId;
@@ -103,11 +104,28 @@ class _HistoryDashboardScreenState extends State<HistoryDashboardScreen> {
                     itemCount: _events.length,
                     itemBuilder: (context, index) {
                       final event = _events[index] as Map<String, dynamic>;
+                      final name = event['known_person_name'] as String?;
+                      final token = Provider.of<AuthService>(context, listen: false).accessToken;
                       return ListTile(
                         title: Text(event['event_type'] as String? ?? 'Event'),
                         subtitle: Text(event['summary'] as String? ?? event['outcome'] as String? ?? ''),
-                        trailing: event['known_person_name'] != null
-                            ? Text(event['known_person_name'] as String)
+                        trailing: name != null
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ImageAvatar(
+                                    imageUrl: event['captured_image'] as String?,
+                                    bearerToken: token,
+                                    radius: 16,
+                                    placeholder: Text(
+                                      name.split(RegExp(r'\s+')).where((part) => part.isNotEmpty).map((part) => part[0]).take(2).join().toUpperCase(),
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(name),
+                                ],
+                              )
                             : null,
                       );
                     },

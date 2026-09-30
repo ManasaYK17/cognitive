@@ -48,6 +48,7 @@ class RecognitionHistory(models.Model):
     subject = GenericForeignKey('content_type', 'object_id')
     timestamp = models.DateTimeField(auto_now_add=True)
     confidence_score = models.FloatField(default=0.0)
+    captured_image = models.ImageField(upload_to='recognition_captures/', blank=True, null=True)
     source = models.CharField(max_length=50)
     outcome = models.CharField(
         max_length=20,

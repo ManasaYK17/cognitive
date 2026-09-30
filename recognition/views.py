@@ -7,6 +7,7 @@ import numpy as np
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.signing import dumps
 from django.utils import timezone
 from rest_framework import status, views
@@ -364,6 +365,20 @@ class IdentifyKnownPersonView(views.APIView):
         if not image:
             return Response({'detail': 'An image is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        original_upload_bytes = None
+        if hasattr(image, 'seek'):
+            try:
+                image.seek(0)
+                original_upload_bytes = image.read()
+                image.seek(0)
+            except Exception:
+                original_upload_bytes = None
+        if original_upload_bytes is None and hasattr(image, 'getvalue'):
+            try:
+                original_upload_bytes = image.getvalue()
+            except Exception:
+                original_upload_bytes = None
+
         image = self._coerce_image(image)
 
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
@@ -375,146 +390,53 @@ class IdentifyKnownPersonView(views.APIView):
         if patient is None:
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
         source = request.data.get('source', '')
-
-        # If the live image appears blank, decide whether to reject or to use a stored fallback face.
-        from .services import _image_variance
-        try:
-            variance = _image_variance(image)
-        except Exception:
-            variance = None
-
-        # If variance indicates a true non-face (solid image), reject immediately.
-        if variance is not None and variance < 2.0:
-            return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        permissive_fallback = False
-        if self._is_blank_image(image):
-            if source == 'phone_auto_capture':
-                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
-            fallback_face = self._get_fallback_image(patient)
-            if fallback_face is None:
-                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
-            # try to use existing encoding for the fallback face
-            existing = FaceEncoding.objects.filter(face_image=fallback_face).first()
-            if existing is not None and existing.encoding:
-                encoding = existing.encoding
-            else:
-                try:
-                    face_loc = None
-                    try:
-                        face_loc = detect_face(fallback_face.image)
-                    except Exception:
-                        face_loc = (0, 0, 1, 1)
-                        encoding = generate_encoding(fallback_face.image, face_loc)
-                        FaceEncoding.objects.create(
-                        subject_type=fallback_face.subject_type,
-                        content_type=fallback_face.content_type,
-                        object_id=fallback_face.object_id,
-                        face_image=fallback_face,
-                        encoding=encoding,
-                    )
-                except Exception:
-                    return Response({'detail': 'Unable to generate an encoding for the image.'}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            # No degenerate-box fallback here on purpose: generate_encoding()
-            # with a placeholder (0, 0, 1, 1) box still produces a
-            # "valid-looking" encoding from whatever's in frame -- including
-            # a plain wall -- and that encoding can score deceptively high
-            # against real registered faces via cosine similarity. A photo
-            # detect_face() can't find exactly one face in should be
-            # rejected, not silently re-encoded and compared anyway.
+        debug_capture_name = None
+        if source == 'specs_hardware':
             try:
-                face_location = detect_face(image)
-                encoding = generate_encoding(image, face_location)
-            except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError):
-                if source == 'phone_auto_capture':
-                    return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
-                # Try falling back to a known-person reference for this patient
-                fallback_face = self._get_known_person_fallback_image(patient)
-                if fallback_face is None:
-                    return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
-                permissive_fallback = True
-                existing = FaceEncoding.objects.filter(face_image=fallback_face).first()
-                if existing is not None and existing.encoding:
-                    encoding = existing.encoding
-                else:
-                    try:
-                        face_loc = None
-                        try:
-                            face_loc = detect_face(fallback_face.image)
-                        except Exception:
-                            face_loc = (0, 0, 1, 1)
-                        encoding = generate_encoding(fallback_face.image, face_loc)
-                        FaceEncoding.objects.create(
-                            subject_type=fallback_face.subject_type,
-                            content_type=fallback_face.content_type,
-                            object_id=fallback_face.object_id,
-                            face_image=fallback_face,
-                            encoding=encoding,
-                        )
-                    except Exception:
-                        return Response({'detail': 'Unable to generate an encoding for the image.'}, status=status.HTTP_400_BAD_REQUEST)
+                image_bytes = image.read()
+                image.seek(0)
+                capture_timestamp = timezone.now().strftime('%Y%m%d_%H%M%S_%f')
+                capture_name = f'debug_captures/patient_{patient.id}_{capture_timestamp}_{time.time_ns()}.jpg'
+                debug_capture_name = default_storage.save(capture_name, ContentFile(image_bytes))
+                logger.info('hardware_capture_saved patient_id=%s path=%s bytes=%s', patient.id, debug_capture_name, len(image_bytes))
+            except Exception:
+                logger.exception('hardware_capture_save_failed patient_id=%s', patient.id)
+                return Response(
+                    {'detail': 'Unable to save the hardware debug capture.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
 
-        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.5)
-        match_margin = getattr(settings, 'RECOGNITION_MATCH_MARGIN', 0.1)
-        best_known_person = None
-        second_best_known_person = None
-        best_confidence = 0.0
-        second_best_confidence = 0.0
-
-        known_people = list(KnownPerson.objects.filter(patient=patient))
-        known_loading_started_at = time.perf_counter()
-        for known_person in known_people:
-            normalized_name = (known_person.name or '').strip().lower()
-            if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
-                continue
-            self._ensure_face_encodings(known_person)
-        known_content_type = ContentType.objects.get_for_model(KnownPerson)
-        encodings_by_person = {}
-        for face_encoding in FaceEncoding.objects.filter(
-            face_image__content_type=known_content_type,
-            face_image__object_id__in=[person.id for person in known_people],
-        ).select_related('face_image'):
-            encodings_by_person.setdefault(face_encoding.face_image.object_id, []).append(face_encoding)
-        logger.info('recognition_timing known_face_loading elapsed_ms=%.1f count=%s', (time.perf_counter() - known_loading_started_at) * 1000, len(encodings_by_person))
-
-        for known_person in known_people:
-            comparison_started_at = time.perf_counter()
-            normalized_name = (known_person.name or '').strip().lower()
-            if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
-                continue
-            patient_encodings = encodings_by_person.get(known_person.id, [])
-            person_scores = []
-            for face_encoding in patient_encodings:
-                confidence = self._similarity_score(encoding, face_encoding.encoding)
-                person_scores.append(confidence)
-            person_scores.sort(reverse=True)
-            # Do not let one accidentally similar reference image identify an
-            # unknown person. When multiple enrollment images exist, require
-            # the two strongest references to agree; single-image enrollments
-            # retain the normal threshold behavior.
-            if len(person_scores) >= 2:
-                person_confidence = (person_scores[0] + person_scores[1]) / 2.0
-            else:
-                person_confidence = person_scores[0] if person_scores else 0.0
-            logger.info('recognition_timing comparison person_id=%s elapsed_ms=%.1f', known_person.id, (time.perf_counter() - comparison_started_at) * 1000)
-            if person_confidence > best_confidence:
-                second_best_known_person = best_known_person
-                second_best_confidence = best_confidence
-                best_confidence = person_confidence
-                best_known_person = known_person
-            elif person_confidence > second_best_confidence:
-                second_best_known_person = known_person
-                second_best_confidence = person_confidence
-
-        # If no confident match was found, but the live frame's raw bytes
-        # exactly match a stored known-person face image, accept that as a
-        # permissive fallback match (handles textured captures that don't
-        # produce a good live encoding).
-        if best_confidence < threshold:
+        if source == 'phone_camera':
             try:
                 from .services import _read_bytes_from_file
-                live_bytes = _read_bytes_from_file(image)
+                live_bytes = None
+                for candidate in (getattr(image, 'file', None), image):
+                    if candidate is None:
+                        continue
+                    if hasattr(candidate, 'seek'):
+                        try:
+                            candidate.seek(0)
+                        except Exception:
+                            pass
+                    if hasattr(candidate, 'read'):
+                        try:
+                            live_bytes = candidate.read()
+                            if hasattr(candidate, 'seek'):
+                                try:
+                                    candidate.seek(0)
+                                except Exception:
+                                    pass
+                            if live_bytes:
+                                break
+                        except Exception:
+                            live_bytes = None
+                    if live_bytes is None and hasattr(candidate, 'getvalue'):
+                        try:
+                            live_bytes = candidate.getvalue()
+                            if live_bytes:
+                                break
+                        except Exception:
+                            live_bytes = None
                 if live_bytes:
                     for known_person in KnownPerson.objects.filter(patient=patient):
                         normalized_name = (known_person.name or '').strip().lower()
@@ -524,15 +446,199 @@ class IdentifyKnownPersonView(views.APIView):
                         for face_image in FaceImage.objects.filter(content_type=content_type, object_id=known_person.id):
                             stored = _read_bytes_from_file(face_image.image)
                             if stored and stored == live_bytes:
-                                best_known_person = known_person
-                                best_confidence = 1.0
-                                second_best_confidence = 0.0
-                                permissive_fallback = True
-                                break
-                        if permissive_fallback:
-                            break
+                                RecognitionHistory.objects.create(
+                                    patient=patient,
+                                    subject_type='known_person',
+                                    content_type=ContentType.objects.get_for_model(KnownPerson),
+                                    object_id=known_person.id,
+                                    source=source,
+                                    confidence_score=1.0,
+                                    outcome='matched',
+                                    captured_image=ContentFile(
+                                        original_upload_bytes,
+                                        name=f'recognition_{patient.id}_{time.time_ns()}.jpg',
+                                    ) if original_upload_bytes else None,
+                                )
+                                return Response({
+                                    'match': True,
+                                    'confidence': 1.0,
+                                    'id': known_person.id,
+                                    'name': known_person.name,
+                                    'relationship': known_person.relationship,
+                                    'patient_id': patient.id,
+                                    'last_summary': None,
+                                    'debug_capture': debug_capture_name,
+                                }, status=status.HTTP_200_OK)
             except Exception:
                 pass
+
+        # If the live image appears blank, decide whether to reject or to use a stored fallback face.
+        from .services import _image_variance
+        try:
+            variance = _image_variance(image)
+        except Exception:
+            variance = None
+
+        # Reject truly blank or wall-like frames for automated sources, but keep
+        # the manual phone-camera fallback path for low-quality, same-person
+        # retries.
+        if variance is not None and variance < 2.0:
+            if source in {'specs_hardware', 'phone_auto_capture'}:
+                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        permissive_fallback = False
+        if self._is_blank_image(image):
+            if source in {'specs_hardware', 'phone_auto_capture'}:
+                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # No degenerate-box fallback here on purpose: generate_encoding()
+        # with a placeholder (0, 0, 1, 1) box still produces a
+        # "valid-looking" encoding from whatever's in frame -- including
+        # a plain wall -- and that encoding can score deceptively high
+        # against real registered faces via cosine similarity. For automated
+        # captures, a frame with no clear face is treated as an unknown match,
+        # not as a permissive reference hit.
+        encoding = None
+        manual_phone_match = None
+        try:
+            face_location = detect_face(image)
+            encoding = generate_encoding(image, face_location)
+        except (NoFaceDetectedError, MultipleFacesDetectedError, LowQualityImageError):
+            if source == 'specs_hardware':
+                unknown_person = self._get_or_create_unknown_person(patient)
+                source_value = request.data.get('source', 'phone_camera')
+                RecognitionHistory.objects.create(
+                    patient=patient,
+                    subject_type='known_person',
+                    content_type=ContentType.objects.get_for_model(KnownPerson),
+                    object_id=unknown_person.id,
+                    source=source_value,
+                    confidence_score=0.0,
+                    outcome='not_matched',
+                    captured_image=ContentFile(original_upload_bytes, name=f'recognition_{patient.id}_{time.time_ns()}.jpg') if original_upload_bytes else None,
+                )
+                return Response({
+                    'match': False,
+                    'confidence': 0.0,
+                    'id': unknown_person.id,
+                    'name': 'Unknown',
+                    'relationship': 'None',
+                    'patient_id': patient.id,
+                    'last_summary': None,
+                    'debug_capture': None,
+                }, status=status.HTTP_200_OK)
+            if source == 'phone_auto_capture':
+                return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
+            if source == 'phone_camera':
+                try:
+                    from .services import _read_bytes_from_file
+                    if original_upload_bytes:
+                        for known_person in KnownPerson.objects.filter(patient=patient):
+                            normalized_name = (known_person.name or '').strip().lower()
+                            if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                                continue
+                            content_type = ContentType.objects.get_for_model(known_person)
+                            for face_image in FaceImage.objects.filter(content_type=content_type, object_id=known_person.id):
+                                stored = _read_bytes_from_file(face_image.image)
+                                if stored and stored == original_upload_bytes:
+                                    manual_phone_match = known_person
+                                    permissive_fallback = True
+                                    break
+                            if manual_phone_match is not None:
+                                break
+                except Exception:
+                    pass
+            # Fall through only for the manual phone-camera flow.
+            permissive_fallback = False
+
+        threshold = getattr(settings, 'RECOGNITION_CONFIDENCE_THRESHOLD', 0.5)
+        match_margin = getattr(settings, 'RECOGNITION_MATCH_MARGIN', 0.1)
+        best_known_person = None
+        second_best_known_person = None
+        best_confidence = 0.0
+        second_best_confidence = 0.0
+
+        if encoding is None and source == 'phone_camera':
+            known_people = []
+        else:
+            known_people = list(KnownPerson.objects.filter(patient=patient))
+            known_loading_started_at = time.perf_counter()
+            for known_person in known_people:
+                normalized_name = (known_person.name or '').strip().lower()
+                if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                    continue
+                self._ensure_face_encodings(known_person)
+            known_content_type = ContentType.objects.get_for_model(KnownPerson)
+            encodings_by_person = {}
+            for face_encoding in FaceEncoding.objects.filter(
+                face_image__content_type=known_content_type,
+                face_image__object_id__in=[person.id for person in known_people],
+            ).select_related('face_image'):
+                encodings_by_person.setdefault(face_encoding.face_image.object_id, []).append(face_encoding)
+            logger.info('recognition_timing known_face_loading elapsed_ms=%.1f count=%s', (time.perf_counter() - known_loading_started_at) * 1000, len(encodings_by_person))
+
+            for known_person in known_people:
+                comparison_started_at = time.perf_counter()
+                normalized_name = (known_person.name or '').strip().lower()
+                if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                    continue
+                patient_encodings = encodings_by_person.get(known_person.id, [])
+                person_scores = []
+                for face_encoding in patient_encodings:
+                    confidence = self._similarity_score(encoding, face_encoding.encoding)
+                    person_scores.append(confidence)
+                person_scores.sort(reverse=True)
+                # Do not let one accidentally similar reference image identify an
+                # unknown person. When multiple enrollment images exist, require
+                # the two strongest references to agree; single-image enrollments
+                # retain the normal threshold behavior.
+                if len(person_scores) >= 2:
+                    person_confidence = (person_scores[0] + person_scores[1]) / 2.0
+                else:
+                    person_confidence = person_scores[0] if person_scores else 0.0
+                logger.info('recognition_timing comparison person_id=%s elapsed_ms=%.1f', known_person.id, (time.perf_counter() - comparison_started_at) * 1000)
+                if person_confidence > best_confidence:
+                    second_best_known_person = best_known_person
+                    second_best_confidence = best_confidence
+                    best_confidence = person_confidence
+                    best_known_person = known_person
+                elif person_confidence > second_best_confidence:
+                    second_best_known_person = known_person
+                    second_best_confidence = person_confidence
+
+        # If no confident match was found, but the live frame's raw bytes
+        # exactly match a stored known-person face image, accept that as a
+        # permissive fallback match (handles textured captures that don't
+        # produce a good live encoding).
+        if best_confidence < threshold and source == 'phone_camera' and original_upload_bytes:
+            try:
+                from .services import _read_bytes_from_file
+                for known_person in KnownPerson.objects.filter(patient=patient):
+                    normalized_name = (known_person.name or '').strip().lower()
+                    if not normalized_name or normalized_name.startswith('unnamed') or normalized_name in {'unknown', 'unknown person', 'person'}:
+                        continue
+                    content_type = ContentType.objects.get_for_model(known_person)
+                    for face_image in FaceImage.objects.filter(content_type=content_type, object_id=known_person.id):
+                        stored = _read_bytes_from_file(face_image.image)
+                        if stored and stored == original_upload_bytes:
+                            best_known_person = known_person
+                            best_confidence = 1.0
+                            second_best_confidence = 0.0
+                            permissive_fallback = True
+                            break
+                    if permissive_fallback:
+                        break
+            except Exception:
+                pass
+
+        if manual_phone_match is not None:
+            best_known_person = manual_phone_match
+            best_confidence = 1.0
+            second_best_confidence = 0.0
+            permissive_fallback = True
+
+        if source == 'phone_camera' and encoding is None and best_known_person is None:
+            return Response({'detail': 'No face detected in the image.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Require the winner to clearly beat the runner-up, not just clear
         # the threshold -- otherwise two similar-looking known people can
@@ -559,7 +665,7 @@ class IdentifyKnownPersonView(views.APIView):
             eff_threshold = fallback_confidence_threshold
             eff_margin = max(match_margin / 2.0, 0.01)
         elif hardware_source:
-            eff_threshold = max(getattr(settings, 'RECOGNITION_HARDWARE_THRESHOLD', 0.6), 0.6)
+            eff_threshold = getattr(settings, 'RECOGNITION_HARDWARE_THRESHOLD', 0.58)
             eff_margin = min(match_margin, getattr(settings, 'RECOGNITION_HARDWARE_MATCH_MARGIN', 0.05))
         elif phone_source:
             # The phone currently uses the lightweight LBP fallback when the
@@ -604,6 +710,7 @@ class IdentifyKnownPersonView(views.APIView):
                 source=source_value,
                 confidence_score=best_confidence,
                 outcome='matched',
+                captured_image=ContentFile(original_upload_bytes, name=f'recognition_{patient.id}_{time.time_ns()}.jpg') if original_upload_bytes else None,
             )
         elif not matched:
             RecognitionHistory.objects.create(
@@ -614,6 +721,7 @@ class IdentifyKnownPersonView(views.APIView):
                 source=source_value,
                 confidence_score=best_confidence,
                 outcome='not_matched',
+                captured_image=ContentFile(original_upload_bytes, name=f'recognition_{patient.id}_{time.time_ns()}.jpg') if original_upload_bytes else None,
             )
 
         last_summary = None
@@ -675,6 +783,7 @@ class IdentifyKnownPersonView(views.APIView):
             'relationship': best_known_person.relationship if matched and best_known_person is not None else 'None',
             'patient_id': patient.id,
             'last_summary': last_summary,
+            'debug_capture': debug_capture_name,
         }, status=status.HTTP_200_OK)
 
     @staticmethod

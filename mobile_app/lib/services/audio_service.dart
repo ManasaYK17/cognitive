@@ -52,7 +52,13 @@ class AudioService extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> stopRecordingAndSend(int patientId, int knownPersonId, String sessionToken, {String language = 'English'}) async {
+  Future<bool> stopRecordingAndSend(
+    int patientId,
+    int knownPersonId,
+    String sessionToken, {
+    String language = 'English',
+    Uint8List? capturedImageBytes,
+  }) async {
     if (kIsWeb) {
       lastSummaryMessage = 'Audio recording not available on web.';
       notifyListeners();
@@ -80,7 +86,11 @@ class AudioService extends ChangeNotifier {
           'patient_id': patientId.toString(),
           'language': language,
         },
-        files: [await http.MultipartFile.fromPath('audio', path)],
+        files: [
+          await http.MultipartFile.fromPath('audio', path),
+          if (capturedImageBytes != null)
+            http.MultipartFile.fromBytes('image', capturedImageBytes, filename: 'conversation-capture.jpg'),
+        ],
         timeout: _uploadTimeout,
       );
       if (response.statusCode == 201 || response.statusCode == 200 || response.statusCode == 207) {

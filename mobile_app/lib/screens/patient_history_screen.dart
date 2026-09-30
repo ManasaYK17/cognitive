@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/app_language.dart';
 import 'patient_history_detail_screen.dart';
+import '../widgets/image_avatar.dart';
 
 class PatientHistoryScreen extends StatefulWidget {
   final String sessionToken;
@@ -16,6 +17,7 @@ class PatientHistoryScreen extends StatefulWidget {
 
 class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
   final ApiClient _api = ApiClient();
+  final ScrollController _scrollController = ScrollController();
   bool _loading = true;
   bool _historyLoadInFlight = false;
   List<dynamic> _history = [];
@@ -31,6 +33,7 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -46,13 +49,18 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
       );
       if (!mounted) return;
       if (response.statusCode == 200) {
-        setState(() {
-          _history = json.decode(response.body) as List<dynamic>;
-          _loading = false;
-        });
+        final updatedHistory = json.decode(response.body) as List<dynamic>;
+        if (_loading || jsonEncode(updatedHistory) != jsonEncode(_history)) {
+          setState(() {
+            _history = updatedHistory;
+            _loading = false;
+          });
+        }
         return;
       }
-      setState(() => _loading = false);
+      if (_loading) setState(() => _loading = false);
+    } catch (_) {
+      if (mounted && _loading) setState(() => _loading = false);
     } finally {
       _historyLoadInFlight = false;
     }
@@ -65,6 +73,8 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView.separated(
+              key: const PageStorageKey<String>('patient-history-list'),
+              controller: _scrollController,
               itemCount: _history.length,
               separatorBuilder: (_, __) => const Divider(),
               itemBuilder: (context, index) {
@@ -72,6 +82,11 @@ class _PatientHistoryScreenState extends State<PatientHistoryScreen> {
                 final knownPersonId = item['known_person_id'] as int?;
                 final knownPersonName = item['known_person_name'] as String? ?? 'Unknown';
                 return ListTile(
+                  key: ValueKey<int?>(knownPersonId),
+                  leading: ImageAvatar(
+                    imageUrl: item['known_person_image'] as String?,
+                    bearerToken: widget.sessionToken,
+                  ),
                   title: Text(knownPersonName),
                   subtitle: Text(item['last_summary'] as String? ?? ''),
                   trailing: const Icon(Icons.chevron_right),

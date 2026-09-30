@@ -1,7 +1,14 @@
+from datetime import timedelta
 from django.core.signing import loads
+import mimetypes
 from django.db import models
 from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.db.models.functions import Coalesce
+from django.utils import timezone
+from django.http import FileResponse
+from django.shortcuts import get_object_or_404
+from django.urls import reverse
+from django.contrib.contenttypes.models import ContentType
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,6 +17,8 @@ from .serializers import HistoryFeedSerializer, PatientHistorySummarySerializer,
 from conversations.models import ConversationHistory
 from conversations.services import localize_conversation_content
 from known_people.models import KnownPerson
+from patients.auth import resolve_patient_from_token
+from patients.models import FaceImage
 
 
 class RecognitionHistoryListView(generics.ListAPIView):
@@ -76,7 +85,7 @@ class HistoryFeedView(APIView):
             error_message=Value(None, output_field=models.CharField()),
         ).values(
             'id', 'event_type', 'patient_id', 'known_person_id', 'known_person_name',
-            'timestamp_alias', 'confidence_score', 'source', 'outcome', 'summary', 'transcript', 'error_message'
+            'timestamp_alias', 'confidence_score', 'source', 'outcome', 'summary', 'transcript', 'error_message', 'captured_image'
         )
 
         conversation_data = conversation_qs.annotate(
@@ -88,17 +97,47 @@ class HistoryFeedView(APIView):
             outcome=Value(None, output_field=models.CharField()),
         ).values(
             'id', 'event_type', 'patient_id', 'known_person_id', 'known_person_name',
-            'timestamp_alias', 'confidence_score', 'source', 'outcome', 'summary', 'transcript', 'error_message'
+            'timestamp_alias', 'confidence_score', 'source', 'outcome', 'summary', 'transcript', 'error_message', 'captured_image'
         )
 
         combined = []
         for item in recognition_data:
             item['timestamp'] = item.pop('timestamp_alias')
+            item['captured_image'] = self._capture_image_url(request, item)
             combined.append(item)
         for item in conversation_data:
             item['timestamp'] = item.pop('timestamp_alias')
+            item['captured_image'] = self._capture_image_url(request, item)
             combined.append(item)
         return sorted(combined, key=lambda item: item['timestamp'], reverse=True)
+
+    @staticmethod
+    def _capture_image_url(request, item):
+        if not item.get('captured_image'):
+            return None
+        return request.build_absolute_uri(reverse(
+            'history-capture-image',
+            kwargs={'event_type': item['event_type'], 'pk': item['id']},
+        ))
+
+
+class HistoryCaptureImageView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, event_type, pk):
+        if event_type == 'conversation':
+            event = get_object_or_404(ConversationHistory, pk=pk, patient__caregiver=request.user)
+        elif event_type == 'recognition':
+            event = get_object_or_404(RecognitionHistory, pk=pk, patient__caregiver=request.user)
+        else:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        image = event.captured_image
+        if not image:
+            return Response({'detail': 'No capture image found.'}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            image.open('rb'),
+            content_type=mimetypes.guess_type(image.name)[0] or 'application/octet-stream',
+        )
 
 
 class PatientHistoryView(APIView):
@@ -133,7 +172,7 @@ class PatientHistoryView(APIView):
                 except (TypeError, ValueError):
                     pass
             response_data = [
-                self._serialize_conversation(item, target_language, include_transcript=not summary_only)
+                self._serialize_conversation(request, item, target_language, include_transcript=not summary_only)
                 for item in history_qs
             ]
             return Response(response_data)
@@ -159,6 +198,11 @@ class PatientHistoryView(APIView):
             response_data.append({
                 'known_person_id': item.known_person_id,
                 'known_person_name': item.known_person.name,
+                'known_person_image': self._patient_image_url(
+                    request,
+                    'known-person',
+                    item.known_person_id,
+                ) if item.known_person.name.strip().lower() not in {'unknown', 'unknown person'} else None,
                 'last_summary': localized['summary'],
                 'last_summary_at': item.created_at,
                 'translation_error': localized['translation_error'],
@@ -168,7 +212,14 @@ class PatientHistoryView(APIView):
         return Response(serializer.data)
 
     @staticmethod
-    def _serialize_conversation(item, target_language, include_transcript=True):
+    def _patient_image_url(request, image_type, pk):
+        return request.build_absolute_uri(reverse(
+            'patient-history-image',
+            kwargs={'image_type': image_type, 'pk': pk},
+        ))
+
+    @classmethod
+    def _serialize_conversation(cls, request, item, target_language, include_transcript=True):
         localized = localize_conversation_content(item, target_language, include_transcript=include_transcript)
         return {
             'id': item.id,
@@ -178,11 +229,46 @@ class PatientHistoryView(APIView):
             'transcript': localized['transcript'],
             'error_message': item.error_message or localized['translation_error'],
             'created_at': item.created_at,
+            'captured_image': cls._patient_image_url(request, 'conversation', item.id) if item.captured_image else None,
         }
+
+
+class PatientHistoryImageView(APIView):
+    authentication_classes = []
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request, image_type, pk):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        token = auth_header.replace('Bearer ', '', 1).strip() if auth_header.startswith('Bearer ') else ''
+        patient = resolve_patient_from_token(token)
+        if patient is None:
+            return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        if image_type == 'conversation':
+            event = get_object_or_404(ConversationHistory, pk=pk, patient=patient)
+            image = event.captured_image
+        elif image_type == 'known-person':
+            person = get_object_or_404(KnownPerson, pk=pk, patient=patient)
+            content_type = ContentType.objects.get_for_model(KnownPerson)
+            face = FaceImage.objects.filter(
+                content_type=content_type,
+                object_id=person.id,
+            ).order_by('-created_at').first()
+            image = face.image if face else None
+        else:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not image:
+            return Response({'detail': 'No image found.'}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            image.open('rb'),
+            content_type=mimetypes.guess_type(image.name)[0] or 'application/octet-stream',
+        )
 
 class PatientRecognitionView(APIView):
     authentication_classes = []
     permission_classes = [permissions.AllowAny]
+    STALE_MATCH_WINDOW = timedelta(seconds=20)
 
     def get(self, request, *args, **kwargs):
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
@@ -196,24 +282,29 @@ class PatientRecognitionView(APIView):
             return Response({'detail': 'Invalid patient session token.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         after = request.query_params.get('after')
-        matches = RecognitionHistory.objects.filter(
+        events = RecognitionHistory.objects.filter(
             patient_id=patient_id,
             subject_type='known_person',
-            outcome='matched',
-        ).exclude(source='phone_auto_capture').order_by('-timestamp')
+            source='specs_hardware',
+        ).order_by('-timestamp')
         if after:
-            matches = matches.filter(timestamp__gt=after)
-        match = matches.first()
-        if match is None or match.subject is None:
+            events = events.filter(timestamp__gt=after)
+        event = events.first()
+        if event is None:
             return Response({'match': False})
-        person = match.subject
+        timestamp = event.timestamp
+        if timestamp < (timezone.now() - self.STALE_MATCH_WINDOW):
+            return Response({'match': False})
+        if event.outcome != 'matched' or event.subject is None:
+            return Response({'match': False, 'timestamp': timestamp})
+        person = event.subject
         if not isinstance(person, KnownPerson) or not person.name.strip() or person.name.lower().startswith('unnamed'):
-            return Response({'match': False})
+            return Response({'match': False, 'timestamp': timestamp})
         return Response({
             'match': True,
             'patient_id': patient_id,
             'known_person_id': person.id,
             'name': person.name,
             'relationship': person.relationship,
-            'timestamp': match.timestamp,
+            'timestamp': timestamp,
         })

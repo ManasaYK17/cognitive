@@ -16,11 +16,12 @@ namespace {
 constexpr uint32_t kIpPrintIntervalMs = 5000;
 constexpr size_t kMinJpegBytes = 4000;     // suspiciously small -> likely blank frame
 constexpr double kMinByteVariance = 300.0; // suspiciously flat -> likely blank/blurred
-constexpr const char *kIdentifyUrl = "http://10.204.67.215:8000/api/recognition/identify-known-person/";
-constexpr const char *kSummarizeUrl = "http://10.204.67.215:8000/api/conversations/summarize/";
-constexpr const char *kTranscribeUrl = "http://10.204.67.215:8000/api/conversations/transcribe/";
-constexpr const char *kCreateFromEncounterUrl = "http://10.204.67.215:8000/api/known-people/create-from-encounter/";
+constexpr const char *kIdentifyUrl = API_BASE_URL "/api/recognition/identify-known-person/";
+constexpr const char *kSummarizeUrl = API_BASE_URL "/api/conversations/summarize/";
+constexpr const char *kTranscribeUrl = API_BASE_URL "/api/conversations/transcribe/";
+constexpr const char *kCreateFromEncounterUrl = API_BASE_URL "/api/known-people/create-from-encounter/";
 constexpr const char *kMultipartBoundary = "specsFirmwareBoundary";
+constexpr const char *kConversationLanguage = CONVERSATION_LANGUAGE;
 // Onboard PDM mic (Seeed XIAO ESP32S3 Sense), read via the newer ESP_I2S.h
 // driver (arduino-esp32 3.x). Replaces the external INMP441 + legacy I2S.h
 // path: confirmed via a standalone Arduino IDE sketch that this
@@ -35,6 +36,7 @@ constexpr int kPdmDataPin = 41;  // Onboard PDM mic DATA
 // called unconditionally every loop() iteration in both states).
 constexpr uint32_t kStatusPrintIntervalMs = 1000;
 constexpr int kSdCsPin = 21;  // Onboard microSD CS (SCK=7/MISO=8/MOSI=9 are board SPI defaults)
+constexpr int kStatusLedPin = 2;  // Optional external status LED; safe on ESP32-S3 and unused by the camera stack.
 
 constexpr uint32_t kWavSampleRate = 16000;
 constexpr uint16_t kWavBitsPerSample = 16;
@@ -66,10 +68,10 @@ constexpr uint32_t kDutyCycleWindowMs = 2000;
 constexpr size_t kDutyCycleBufferCapacity = 512;
 // Duty cycle (% of recent chunks above kNoiseFloor) must stay at/above this
 // -- start low, tune from the live printed duty=%.1f%% values.
-constexpr float kVoiceActivityDutyCycleThreshold = 40.0f;
+constexpr float kVoiceActivityDutyCycleThreshold = 20.0f;
 // ...sustained continuously for this long to count as "conversation
 // started", not just a brief loud burst nudging the ratio up momentarily.
-constexpr uint32_t kVoiceActivityThresholdMs = 2000;
+constexpr uint32_t kVoiceActivityThresholdMs = 500;
 // Duty cycle must drop to/below this to end the recording -- also tune from
 // the live printed values.
 constexpr float kSilenceDutyCycleThreshold = 10.0f;
@@ -77,7 +79,10 @@ constexpr float kSilenceDutyCycleThreshold = 10.0f;
 // value for testing -- real 30s/45-60s tuning later.
 constexpr uint32_t kSilenceTimeoutMsPlaceholder = 10000;
 constexpr uint32_t kIdentifyDelayAfterRecordingMs = 0;
-constexpr uint32_t kPostMatchRecordingMs = 10000;
+constexpr uint32_t kResultPagePresentationDelayMs = 10000;
+constexpr uint32_t kPostMatchRecordingMs = 15000;
+constexpr uint32_t kIdentifyImageCapturedNotification = 1U << 0;
+constexpr uint32_t kIdentifyRequestCompleteNotification = 1U << 1;
 // HTTPClient's default (HTTPCLIENT_DEFAULT_TCP_TIMEOUT, HTTPClient.h) is
 // only 5000ms -- an inactivity timeout on waiting for the server's
 // response, confirmed too short for postConversationAudio(): uploading a
@@ -104,10 +109,14 @@ AppState currentState = AppState::LISTENING;
 uint32_t voiceActivityStartedAt = 0;  // 0 = not currently tracking a sustained-loud run
 uint32_t silenceStartedAt = 0;        // 0 = not currently tracking a sustained-quiet run
 bool identifyAttempted = false;       // per-RECORDING-session latch, reset in enterRecording()
+volatile bool identifyImageCaptureInProgress = false;
 bool lastIdentifyMatch = false;
 bool identifyInProgress = false;
-bool matchCountdownActive = false;
-uint32_t identifyMatchFoundAtMs = 0;
+bool recordingAudioClosed = false;
+bool identificationComplete = false;
+bool postMatchRecordingActive = false;
+uint32_t identificationCompletedAtMs = 0;
+uint32_t postMatchRecordingStartedAtMs = 0;
 TaskHandle_t mainLoopTaskHandle = nullptr;
 TaskHandle_t identifyTaskHandle = nullptr;
 struct IdentifyTaskResult {
@@ -356,7 +365,9 @@ bool identifyKnownPerson(camera_fb_t *fb, String &outName, String &outRelationsh
 void identifyPersonTask(void *parameter) {
   (void)parameter;
   IdentifyTaskResult result = {};
+  identifyImageCaptureInProgress = true;
   camera_fb_t *fb = captureFrameViaReinit();
+  identifyImageCaptureInProgress = false;
   if (fb) {
     result.imageBytes = psramFound() ? (uint8_t *)ps_malloc(fb->len) : (uint8_t *)malloc(fb->len);
     if (result.imageBytes) {
@@ -365,16 +376,18 @@ void identifyPersonTask(void *parameter) {
     } else {
       Serial.println("[IDENTIFY] Failed to allocate buffer to hold captured image.");
     }
+    xTaskNotify(mainLoopTaskHandle, kIdentifyImageCapturedNotification, eSetBits);
     result.match = identifyKnownPerson(fb, result.name, result.relationship, result.summary,
                                        result.knownPersonId, result.patientId);
     esp_camera_fb_return(fb);
   } else {
     Serial.println("[IDENTIFY] capture failed (even after deinit/reinit).");
+    xTaskNotify(mainLoopTaskHandle, kIdentifyImageCapturedNotification, eSetBits);
   }
   esp_camera_deinit();
 
   pendingIdentifyResult = result;
-  xTaskNotifyGive(mainLoopTaskHandle);
+  xTaskNotify(mainLoopTaskHandle, kIdentifyRequestCompleteNotification, eSetBits);
   vTaskDelete(nullptr);
 }
 
@@ -386,11 +399,17 @@ void identifyPersonTask(void *parameter) {
 // in memory elsewhere (identifyKnownPerson(), postCreateFromEncounter()).
 class MultipartFileStream : public Stream {
  public:
-  MultipartFileStream(const String &preamble, File &file, const String &epilogue)
-      : preamble_(preamble), file_(file), epilogue_(epilogue) {}
+  MultipartFileStream(const String &preamble, File &file, const String &captureHeader,
+                      const uint8_t *captureImageBytes, size_t captureImageLength,
+                      const String &epilogue)
+      : preamble_(preamble), file_(file), captureHeader_(captureHeader),
+        captureImageBytes_(captureImageBytes), captureImageLength_(captureImageLength), epilogue_(epilogue) {}
 
   int available() override {
-    return (int)((preamble_.length() - preambleIndex_) + file_.available() + (epilogue_.length() - epilogueIndex_));
+    return (int)((preamble_.length() - preambleIndex_) + file_.available() +
+                 (captureHeader_.length() - captureHeaderIndex_) +
+                 (captureImageLength_ - captureImageIndex_) +
+                 (epilogue_.length() - epilogueIndex_));
   }
 
   int read() override {
@@ -400,6 +419,8 @@ class MultipartFileStream : public Stream {
       if (b >= 0) fileBytesServed_++;
       return b;
     }
+    if (captureHeaderIndex_ < captureHeader_.length()) return (uint8_t)captureHeader_[captureHeaderIndex_++];
+    if (captureImageIndex_ < captureImageLength_) return captureImageBytes_[captureImageIndex_++];
     if (epilogueIndex_ < epilogue_.length()) return (uint8_t)epilogue_[epilogueIndex_++];
     return -1;
   }
@@ -407,6 +428,8 @@ class MultipartFileStream : public Stream {
   int peek() override {
     if (preambleIndex_ < preamble_.length()) return (uint8_t)preamble_[preambleIndex_];
     if (file_.available()) return file_.peek();
+    if (captureHeaderIndex_ < captureHeader_.length()) return (uint8_t)captureHeader_[captureHeaderIndex_];
+    if (captureImageIndex_ < captureImageLength_) return captureImageBytes_[captureImageIndex_];
     if (epilogueIndex_ < epilogue_.length()) return (uint8_t)epilogue_[epilogueIndex_];
     return -1;
   }
@@ -424,6 +447,11 @@ class MultipartFileStream : public Stream {
   String preamble_;
   size_t preambleIndex_ = 0;
   File &file_;
+  String captureHeader_;
+  size_t captureHeaderIndex_ = 0;
+  const uint8_t *captureImageBytes_;
+  size_t captureImageLength_;
+  size_t captureImageIndex_ = 0;
   String epilogue_;
   size_t epilogueIndex_ = 0;
   size_t fileBytesServed_ = 0;
@@ -436,7 +464,8 @@ class MultipartFileStream : public Stream {
 // the HTTP status code (<=0 on transport failure) and fills
 // outTranscript/outSummary from the JSON response when parseable.
 int postConversationAudio(const char *url, const String &filename, long patientId, long knownPersonId,
-                           bool includeKnownPersonId, String &outTranscript, String &outSummary) {
+                           bool includeKnownPersonId, const uint8_t *captureImageBytes,
+                           size_t captureImageLength, String &outTranscript, String &outSummary) {
   File file = SD.open(filename, FILE_READ);
   if (!file) {
     Serial.printf("[UPLOAD] Failed to open %s for upload to %s\n", filename.c_str(), url);
@@ -452,13 +481,22 @@ int postConversationAudio(const char *url, const String &filename, long patientI
                 String(knownPersonId) + "\r\n";
   }
   preamble += String("--") + kMultipartBoundary + "\r\n" +
+              "Content-Disposition: form-data; name=\"language\"\r\n\r\n" +
+              kConversationLanguage + "\r\n";
+  preamble += String("--") + kMultipartBoundary + "\r\n" +
               "Content-Disposition: form-data; name=\"audio\"; filename=\"recording.wav\"\r\n" +
               "Content-Type: audio/wav\r\n\r\n";
+  String captureHeader;
+  if (captureImageBytes != nullptr && captureImageLength > 0) {
+    captureHeader = String("\r\n--") + kMultipartBoundary + "\r\n" +
+                    "Content-Disposition: form-data; name=\"image\"; filename=\"capture.jpg\"\r\n" +
+                    "Content-Type: image/jpeg\r\n\r\n";
+  }
   String epilogue = String("\r\n--") + kMultipartBoundary + "--\r\n";
 
   size_t fileSizeBytes = file.size();
-  size_t totalLen = preamble.length() + fileSizeBytes + epilogue.length();
-  MultipartFileStream bodyStream(preamble, file, epilogue);
+  size_t totalLen = preamble.length() + fileSizeBytes + captureHeader.length() + captureImageLength + epilogue.length();
+  MultipartFileStream bodyStream(preamble, file, captureHeader, captureImageBytes, captureImageLength, epilogue);
 
   HTTPClient http;
   http.begin(url);
@@ -803,6 +841,9 @@ void recordLoopIterationDuration(uint32_t iterationStartUs) {
 
 void setState(AppState newState) {
   currentState = newState;
+  if (kStatusLedPin >= 0) {
+    digitalWrite(kStatusLedPin, newState == AppState::RECORDING ? HIGH : LOW);
+  }
   Serial.print("[STATE] ");
   Serial.println(newState == AppState::LISTENING ? "LISTENING" : "RECORDING");
 }
@@ -816,10 +857,14 @@ void enterRecording() {
   recordingSessionStartedAtMs = millis();
   identifyAttempted = false;
   identifyInProgress = false;
-  matchCountdownActive = false;
-  identifyMatchFoundAtMs = 0;
+  recordingAudioClosed = false;
+  identificationComplete = false;
+  postMatchRecordingActive = false;
+  identificationCompletedAtMs = 0;
+  postMatchRecordingStartedAtMs = 0;
   identifyTaskHandle = nullptr;
   pendingIdentifyResult = {};
+  latestClosedRecordingFilename = "";
   // Reset every session so a failed/skipped identify attempt this session
   // can never fall back to a stale result from a previous one when
   // exitRecording() decides which backend upload path to take.
@@ -829,65 +874,74 @@ void enterRecording() {
   lastIdentifySummary = "";
   lastIdentifyKnownPersonId = 0;
   lastIdentifyPatientId = 0;
-  if (sdReady) {
-    currentRecordingFilename = "/rec_" + String(recordingFileCounter++) + ".wav";
-    recordingFile = SD.open(currentRecordingFilename, FILE_WRITE);
-    if (recordingFile) {
-      writeWavHeaderPlaceholder(recordingFile);
-      Serial.printf("Recording to %s\n", currentRecordingFilename.c_str());
-    } else {
-      Serial.printf("Failed to open %s for writing.\n", currentRecordingFilename.c_str());
-    }
-  }
+  currentRecordingFilename = "";
 
   silenceStartedAt = 0;
   setState(AppState::RECORDING);
 }
 
+bool startPostMatchRecording() {
+  recordingBytesWritten = 0;
+  totalBytesRead = 0;
+  recordingChunkCount = 0;
+  recordingSessionStartedAtMs = millis();
+  postMatchRecordingStartedAtMs = recordingSessionStartedAtMs;
+  currentRecordingFilename = "/rec_" + String(recordingFileCounter++) + ".wav";
+  recordingFile = sdReady ? SD.open(currentRecordingFilename, FILE_WRITE) : File();
+  if (!recordingFile) {
+    currentRecordingFilename = "";
+    Serial.println("[RECORDING] Could not open matched-conversation WAV file.");
+    return false;
+  }
+
+  writeWavHeaderPlaceholder(recordingFile);
+  postMatchRecordingActive = true;
+  Serial.printf("[RECORDING] Capturing matched conversation to %s for %lums\n",
+                currentRecordingFilename.c_str(), (unsigned long)kPostMatchRecordingMs);
+  return true;
+}
+
+void closeRecordingFile() {
+  if (!recordingFile) return;
+
+  uint32_t durationMs = millis() - recordingSessionStartedAtMs;
+  double effectiveRateExact =
+      durationMs > 0 ? (double)totalBytesRead / (durationMs / 1000.0) / (kWavBitsPerSample / 8)
+                      : (double)kWavSampleRate;
+  uint32_t effectiveSampleRate = (uint32_t)(effectiveRateExact + 0.5);
+
+  finalizeWavHeader(recordingFile, recordingBytesWritten, effectiveSampleRate);
+  recordingFile.close();
+  latestClosedRecordingFilename = currentRecordingFilename;
+  float avgBytesPerChunk = recordingChunkCount > 0 ? (float)totalBytesRead / recordingChunkCount : 0.0f;
+  Serial.printf("Recording closed: durationMs=%u totalBytesRead=%u bytesWritten=%u chunkCount=%u avgBytesPerChunk=%.1f effectiveSampleRate=%u\n",
+                durationMs, totalBytesRead, recordingBytesWritten, recordingChunkCount, avgBytesPerChunk, effectiveSampleRate);
+}
+
 void exitRecording() {
-  if (recordingFile) {
-    uint32_t durationMs = millis() - recordingSessionStartedAtMs;
-    // Measured, not requested: real bytes actually written divided by real
-    // elapsed time, so the header is correct regardless of what sample rate
-    // the mic driver actually delivers versus what was requested.
-    double effectiveRateExact =
-        durationMs > 0 ? (double)totalBytesRead / (durationMs / 1000.0) / (kWavBitsPerSample / 8)
-                        : (double)kWavSampleRate;
-    uint32_t effectiveSampleRate = (uint32_t)(effectiveRateExact + 0.5);
+  closeRecordingFile();
 
-    finalizeWavHeader(recordingFile, recordingBytesWritten, effectiveSampleRate);
-    recordingFile.close();
-    latestClosedRecordingFilename = currentRecordingFilename;
-    float avgBytesPerChunk = recordingChunkCount > 0 ? (float)totalBytesRead / recordingChunkCount : 0.0f;
-    Serial.printf("Recording closed: durationMs=%u totalBytesRead=%u bytesWritten=%u chunkCount=%u avgBytesPerChunk=%.1f effectiveSampleRate=%u\n",
-                  durationMs, totalBytesRead, recordingBytesWritten, recordingChunkCount, avgBytesPerChunk, effectiveSampleRate);
-
-    // Upload flow: branch on what the mid-session identify attempt (if any)
-    // found. Runs synchronously here, so it adds upload latency to the
-    // LISTENING transition below.
-    if (!identifyAttempted) {
-      Serial.println("[UPLOAD] No identify attempt this session -- skipping conversation upload.");
-    } else if (lastIdentifyMatch) {
-      String unusedTranscript, unusedSummary;
-      int httpCode = postConversationAudio(kSummarizeUrl, latestClosedRecordingFilename, lastIdentifyPatientId,
-                                            lastIdentifyKnownPersonId, true, unusedTranscript, unusedSummary);
-      if (httpCode >= 200 && httpCode < 300) {
-        Serial.printf("[UPLOAD] summarize/ succeeded (HTTP %d) for known_person_id=%ld\n", httpCode, lastIdentifyKnownPersonId);
-      } else {
-        Serial.printf("[UPLOAD] summarize/ failed (HTTP %d) for known_person_id=%ld\n", httpCode, lastIdentifyKnownPersonId);
-      }
+  if (!identifyAttempted) {
+    Serial.println("[UPLOAD] No identify attempt this session -- skipping conversation upload.");
+  } else if (latestClosedRecordingFilename.length() == 0) {
+    Serial.println("[UPLOAD] No closed recording available -- skipping conversation upload.");
+  } else if (!lastIdentifyMatch) {
+    bool removed = SD.exists(latestClosedRecordingFilename.c_str()) && SD.remove(latestClosedRecordingFilename.c_str());
+    latestClosedRecordingFilename = "";
+    Serial.printf("[UPLOAD] No known-person match -- not saving conversation; temporary WAV %s.\n",
+                  removed ? "deleted from SD" : "was already absent from SD");
+  } else if (lastIdentifyPatientId <= 0 || lastIdentifyKnownPersonId <= 0) {
+    Serial.println("[UPLOAD] Matched response missing patient/person id -- recording remains on SD.");
+  } else {
+    String unusedTranscript, unusedSummary;
+    int httpCode = postConversationAudio(kSummarizeUrl, latestClosedRecordingFilename, lastIdentifyPatientId,
+                                          lastIdentifyKnownPersonId, true, heldIdentifyImageBytes,
+                                          heldIdentifyImageLength, unusedTranscript, unusedSummary);
+    if (httpCode >= 200 && httpCode < 300) {
+      Serial.printf("[UPLOAD] summarize/ succeeded (HTTP %d) for known_person_id=%ld\n", httpCode,
+                    lastIdentifyKnownPersonId);
     } else {
-      // Store unknown-person conversations under the patient's single shared
-      // "Unknown" identity, preserving the recording and summary metadata while
-      // preventing duplicate unknown identities from being created.
-      String unusedTranscript, unusedSummary;
-      int httpCode = postConversationAudio(kSummarizeUrl, latestClosedRecordingFilename, lastIdentifyPatientId,
-                                            lastIdentifyKnownPersonId, true, unusedTranscript, unusedSummary);
-      if (httpCode >= 200 && httpCode < 300) {
-        Serial.printf("[UPLOAD] summarize/ succeeded (HTTP %d) for shared Unknown identity id=%ld\n", httpCode, lastIdentifyKnownPersonId);
-      } else {
-        Serial.printf("[UPLOAD] summarize/ failed (HTTP %d) for shared Unknown identity id=%ld\n", httpCode, lastIdentifyKnownPersonId);
-      }
+      Serial.printf("[UPLOAD] summarize/ failed (HTTP %d) for id=%ld\n", httpCode, lastIdentifyKnownPersonId);
     }
   }
 
@@ -902,6 +956,9 @@ void exitRecording() {
 
   // Mic stays running -- LISTENING needs it continuously too.
   voiceActivityStartedAt = 0;
+  recordingAudioClosed = false;
+  identificationComplete = false;
+  identifyInProgress = false;
   setState(AppState::LISTENING);
 }
 
@@ -977,6 +1034,9 @@ void setup() {
   Serial.print(deviceAuthToken);
   Serial.println(" <patient_id>");
 
+  pinMode(kStatusLedPin, OUTPUT);
+  digitalWrite(kStatusLedPin, LOW);
+
   cameraReady = initCamera();
   if (!cameraReady) {
     Serial.println("Camera unavailable; capture loop will stay idle.");
@@ -1007,6 +1067,7 @@ void setup() {
 void loop() {
   static uint32_t lastPrint = 0;
   static uint32_t lastStatusPrint = 0;
+  static uint32_t lastLedToggleMs = 0;
   uint32_t iterationStartUs = micros();
   uint32_t now = millis();
 
@@ -1031,27 +1092,35 @@ void loop() {
 
   server.handleClient();
 
-  if (identifyTaskHandle != nullptr && ulTaskNotifyTake(pdTRUE, 0) > 0) {
-    identifyTaskHandle = nullptr;
-    identifyInProgress = false;
-    lastIdentifyMatch = pendingIdentifyResult.match;
-    lastIdentifyName = pendingIdentifyResult.name;
-    lastIdentifyRelationship = pendingIdentifyResult.relationship;
-    lastIdentifySummary = pendingIdentifyResult.summary;
-    lastIdentifyKnownPersonId = pendingIdentifyResult.knownPersonId;
-    lastIdentifyPatientId = pendingIdentifyResult.patientId;
-    heldIdentifyImageBytes = pendingIdentifyResult.imageBytes;
-    heldIdentifyImageLength = pendingIdentifyResult.imageLength;
-    pendingIdentifyResult.imageBytes = nullptr;
-    pendingIdentifyResult.imageLength = 0;
+  uint32_t identifyNotifications = 0;
+  if (xTaskNotifyWait(0, 0xFFFFFFFFUL, &identifyNotifications, 0) == pdTRUE) {
+    if (identifyNotifications & kIdentifyImageCapturedNotification) {
+      Serial.println("[IDENTIFY] Image capture finished; waiting for recognition result.");
+      recordingAudioClosed = true;
+    }
 
-    if (lastIdentifyMatch) {
-      identifyMatchFoundAtMs = millis();
-      matchCountdownActive = true;
-      Serial.printf("[IDENTIFY] match confirmed; recording will stop in %lums\n",
-                    (unsigned long)kPostMatchRecordingMs);
-    } else {
-      Serial.println("[IDENTIFY] result: match=false (no known person identified)");
+    if (identifyNotifications & kIdentifyRequestCompleteNotification) {
+      identifyTaskHandle = nullptr;
+      identifyInProgress = false;
+      identificationComplete = true;
+      identificationCompletedAtMs = millis();
+      lastIdentifyMatch = pendingIdentifyResult.match;
+      lastIdentifyName = pendingIdentifyResult.name;
+      lastIdentifyRelationship = pendingIdentifyResult.relationship;
+      lastIdentifySummary = pendingIdentifyResult.summary;
+      lastIdentifyKnownPersonId = pendingIdentifyResult.knownPersonId;
+      lastIdentifyPatientId = pendingIdentifyResult.patientId;
+      heldIdentifyImageBytes = pendingIdentifyResult.imageBytes;
+      heldIdentifyImageLength = pendingIdentifyResult.imageLength;
+      pendingIdentifyResult.imageBytes = nullptr;
+      pendingIdentifyResult.imageLength = 0;
+
+      if (lastIdentifyMatch) {
+        Serial.printf("[IDENTIFY] result: match=true name=%s relationship=%s last_summary=%s\n",
+                      lastIdentifyName.c_str(), lastIdentifyRelationship.c_str(), lastIdentifySummary.c_str());
+      } else {
+        Serial.println("[IDENTIFY] result: match=false (no known person identified)");
+      }
     }
     now = millis();
   }
@@ -1072,6 +1141,10 @@ void loop() {
   float dutyCyclePercent = currentDutyCyclePercent();
 
   if (currentState == AppState::LISTENING) {
+    if (now - lastLedToggleMs >= 500) {
+      digitalWrite(kStatusLedPin, !digitalRead(kStatusLedPin));
+      lastLedToggleMs = now;
+    }
     if (dutyCyclePercent >= kVoiceActivityDutyCycleThreshold) {
       if (voiceActivityStartedAt == 0) voiceActivityStartedAt = now;
       if (now - voiceActivityStartedAt >= kVoiceActivityThresholdMs) {
@@ -1081,11 +1154,19 @@ void loop() {
       voiceActivityStartedAt = 0;
     }
   } else {  // AppState::RECORDING
+    if (identifyImageCaptureInProgress) {
+      if (now - lastLedToggleMs >= 150) {
+        digitalWrite(kStatusLedPin, !digitalRead(kStatusLedPin));
+        lastLedToggleMs = now;
+      }
+    } else {
+      digitalWrite(kStatusLedPin, HIGH);
+    }
     if (!identifyAttempted && cameraReady &&
         (now - recordingSessionStartedAtMs) >= kIdentifyDelayAfterRecordingMs) {
       identifyAttempted = true;
       identifyInProgress = true;
-      Serial.println("[IDENTIFY] Starting face identification while audio recording continues.");
+      Serial.println("[IDENTIFY] Starting face identification after voice activity.");
       BaseType_t taskCreated = xTaskCreatePinnedToCore(
           identifyPersonTask, "identifyPerson", 8192, nullptr, 1, &identifyTaskHandle, 0);
       if (taskCreated != pdPASS) {
@@ -1095,9 +1176,21 @@ void loop() {
       }
     }
 
-    if (lastIdentifyMatch && matchCountdownActive) {
-      if (now - identifyMatchFoundAtMs >= kPostMatchRecordingMs) {
-        Serial.println("[RECORDING] Post-match capture window ended; closing and uploading conversation.");
+    if (recordingAudioClosed && identificationComplete) {
+      if (!lastIdentifyMatch || lastIdentifyPatientId <= 0 || lastIdentifyKnownPersonId <= 0) {
+        Serial.println("[RECORDING] No known-person match; ending without capturing or uploading conversation audio.");
+        exitRecording();
+      } else if (!postMatchRecordingActive) {
+        // The patient app polls once per second; let the result route open before recording begins.
+        if (now - identificationCompletedAtMs >= kResultPagePresentationDelayMs) {
+          if (!startPostMatchRecording()) {
+            exitRecording();
+          }
+          now = millis();
+        }
+      } else if (now - postMatchRecordingStartedAtMs >= kPostMatchRecordingMs) {
+        Serial.println("[RECORDING] Matched conversation window ended; uploading now.");
+        closeRecordingFile();
         exitRecording();
       }
     } else if (!identifyInProgress && dutyCyclePercent <= kSilenceDutyCycleThreshold) {

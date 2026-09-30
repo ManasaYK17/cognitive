@@ -22,6 +22,7 @@ class HistoryFeedSerializer(serializers.Serializer):
     patient_id = serializers.IntegerField(read_only=True)
     known_person_id = serializers.IntegerField(read_only=True, allow_null=True)
     known_person_name = serializers.CharField(read_only=True, allow_null=True)
+    captured_image = serializers.CharField(read_only=True, allow_null=True)
     timestamp = serializers.DateTimeField(read_only=True)
     confidence_score = serializers.FloatField(read_only=True, allow_null=True)
     source = serializers.CharField(read_only=True, allow_null=True)
@@ -44,6 +45,7 @@ class PatientHistoryConversationSerializer(serializers.Serializer):
 class PatientHistorySummarySerializer(serializers.Serializer):
     known_person_id = serializers.IntegerField(read_only=True)
     known_person_name = serializers.CharField(read_only=True)
+    known_person_image = serializers.CharField(read_only=True, allow_null=True)
     last_summary = serializers.CharField(read_only=True, allow_null=True)
     last_summary_at = serializers.DateTimeField(read_only=True, allow_null=True)
     translation_error = serializers.CharField(read_only=True, allow_null=True)

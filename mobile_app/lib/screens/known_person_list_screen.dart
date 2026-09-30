@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
+import '../widgets/image_avatar.dart';
 import 'known_person_detail_screen.dart';
 
 class KnownPersonListScreen extends StatefulWidget {
@@ -33,8 +34,12 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
     });
     if (!mounted) return;
     if (response.statusCode == 200) {
+      final people = json.decode(response.body) as List<dynamic>;
       setState(() {
-        _knownPeople = json.decode(response.body) as List<dynamic>;
+        _knownPeople = people.where((person) {
+          final name = (person['name'] as String? ?? '').trim().toLowerCase();
+          return name != 'unknown';
+        }).toList();
         _loading = false;
       });
       return;
@@ -50,6 +55,7 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final accessToken = Provider.of<AuthService>(context, listen: false).accessToken;
     return WillPopScope(
       onWillPop: () async {
         Navigator.of(context).pop(_changed == true);
@@ -152,22 +158,12 @@ class _KnownPersonListScreenState extends State<KnownPersonListScreen> {
                                 padding: const EdgeInsets.all(12),
                                 child: Row(
                                   children: [
-                                    CircleAvatar(
+                                    ImageAvatar(
+                                      imageUrl: person['face_image'] as String?,
+                                      bearerToken: accessToken,
                                       radius: 24,
-                                      backgroundColor: Theme.of(context)
-                                          .colorScheme
-                                          .primary
-                                          .withAlpha((0.2 * 255).round()),
-                                      backgroundImage: person['face_image'] !=
-                                              null
-                                          ? NetworkImage(
-                                              person['face_image'] as String)
-                                          : null,
-                                      child: person['face_image'] == null
-                                          ? Text(initials,
-                                              style: const TextStyle(
-                                                  fontWeight: FontWeight.bold))
-                                          : null,
+                                      backgroundColor: Theme.of(context).colorScheme.primary.withAlpha((0.2 * 255).round()),
+                                      placeholder: Text(initials, style: const TextStyle(fontWeight: FontWeight.bold)),
                                     ),
                                     const SizedBox(width: 12),
                                     Expanded(

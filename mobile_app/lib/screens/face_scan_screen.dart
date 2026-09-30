@@ -32,7 +32,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     setState(() {
       _scanning = true;
-      _statusMessage = appLanguage.translate('scanning_known_patient');
+      _statusMessage = _statusTextChecking;
     });
 
     final authService = Provider.of<AuthService>(context, listen: false);

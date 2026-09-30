@@ -64,13 +64,9 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     });
     _loadRecentMemories();
     unawaited(_initializeTts());
-    // Hardware recognition can finish while the app is transitioning into
-    // patient mode. Look back briefly so that match is not lost before the
-    // polling timer starts.
-    _lastHardwareRecognitionTimestamp = DateTime.now()
-      .toUtc()
-      .subtract(const Duration(minutes: 2))
-      .toIso8601String();
+    // Ignore stale hardware matches from earlier sessions after reconnect.
+    // The device should only open a result page for a fresh recognition event.
+    _lastHardwareRecognitionTimestamp = DateTime.now().toUtc().toIso8601String();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _prepareLocationReporting();
       _startRecognitionPolling();
@@ -139,16 +135,20 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         debugPrint('[patient_home] recognition poll status=${response.statusCode} body=${response.body}');
         if (!mounted || response.statusCode != 200) return;
         final payload = json.decode(response.body) as Map<String, dynamic>;
-        if (payload['match'] != true) return;
         final timestamp = payload['timestamp'] as String?;
-        if (timestamp == null || timestamp == _lastHardwareRecognitionTimestamp || _openingHardwareResult) return;
+        if (timestamp == null || timestamp == _lastHardwareRecognitionTimestamp) return;
+        final parsedTimestamp = DateTime.tryParse(timestamp);
+        if (parsedTimestamp == null) return;
+        final now = DateTime.now().toUtc();
+        if (now.difference(parsedTimestamp.toUtc()).abs() > const Duration(seconds: 20)) {
+          return;
+        }
+        _lastHardwareRecognitionTimestamp = timestamp;
+        if (payload['match'] != true || _openingHardwareResult) return;
         _openingHardwareResult = true;
         try {
           debugPrint('[patient_home] hardware match payload=$payload');
-          final navigated = await _openHardwareResult(payload);
-          if (navigated && mounted) {
-            _lastHardwareRecognitionTimestamp = timestamp;
-          }
+          await _openHardwareResult(payload);
         } catch (error, stackTrace) {
           debugPrint('[patient_home] failed to open hardware result: $error');
           debugPrint(stackTrace.toString());
@@ -333,6 +333,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
       return;
     }
     final bytes = await result.image!.readAsBytes();
+    if (!mounted) return;
     payload = await recognitionService.attemptRecognitionFromBytes(
       bytes,
       result.image!.name,
@@ -353,28 +354,30 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     }
 
     if (recognitionPayload['match'] != true) {
-      final unknownPersonId = recognitionPayload['id'] as int?;
-      if (unknownPersonId == null) {
-        final message = appLanguage.translate('unknown_person_detected');
-        await _announceMessage(message);
-        messenger.showSnackBar(
-          SnackBar(content: Text('$message. ${appLanguage.translate('try_again')}')),
+      final unknownPersonId = int.tryParse(recognitionPayload['id']?.toString() ?? '');
+      if (unknownPersonId != null) {
+        await WidgetsBinding.instance.endOfFrame;
+        if (!mounted) return;
+        navigator.push(
+          MaterialPageRoute(
+            builder: (_) => PatientRecognitionResultScreen(
+              patientId: widget.patientId,
+              knownPersonId: unknownPersonId,
+              knownPersonName: 'Unknown',
+              knownPersonRelationship: 'None',
+              sessionToken: widget.sessionToken,
+              initialLastSummary: recognitionPayload['last_summary']?.toString(),
+              capturedImageBytes: bytes,
+              recordFromPhone: true,
+            ),
+          ),
         );
         return;
       }
 
-      navigator.push(
-        MaterialPageRoute(
-          builder: (_) => PatientRecognitionResultScreen(
-            patientId: widget.patientId,
-            knownPersonId: unknownPersonId,
-            knownPersonName: 'Unknown',
-            knownPersonRelationship: 'None',
-            sessionToken: widget.sessionToken,
-            recordFromPhone: true,
-          ),
-        ),
-      );
+      final message = appLanguage.translate('unknown_person_detected');
+      await _announceMessage(message);
+      messenger.showSnackBar(SnackBar(content: Text('$message. ${appLanguage.translate('try_again')}')));
       return;
     }
 
@@ -382,7 +385,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final knownPersonName = recognitionPayload['name'] as String? ?? 'Person';
     final knownPersonRelationship = recognitionPayload['relationship'] as String?;
     if (knownPersonId != 0 && knownPersonName != 'Person') {
-      await _announceMessage('Recognized $knownPersonName');
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
       navigator.push(
         MaterialPageRoute(
           builder: (_) => PatientRecognitionResultScreen(
@@ -391,6 +395,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             knownPersonName: knownPersonName,
             knownPersonRelationship: knownPersonRelationship,
             sessionToken: widget.sessionToken,
+            initialLastSummary: recognitionPayload['last_summary']?.toString(),
+            capturedImageBytes: bytes,
           ),
         ),
       );
@@ -470,9 +476,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 12),
-        if (_scanning)
-          const CircularProgressIndicator(color: DesignTokens.accent)
-        else if (person != null)
+        if (person != null)
           Text(
             isMatch ? '${appLanguage.translate('recognized')}: $recognizedName' : appLanguage.translate('unknown_person_detected'),
             style: Theme.of(context).textTheme.titleMedium?.copyWith(color: isMatch ? DesignTokens.success : Colors.orangeAccent),

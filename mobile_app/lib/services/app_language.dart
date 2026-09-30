@@ -70,7 +70,6 @@ class AppLanguage extends ChangeNotifier {
   static final Map<String, Map<String, String>> _translations = {
     'English': {
       'checking_whos_here': "Checking who's here...",
-      'scanning_known_patient': 'Scanning for a known patient...',
       'no_face_detected': 'No face detected',
       'no_matching_patient_found': 'No matching patient found',
       'ready_to_scan': 'Ready to scan',
@@ -169,7 +168,6 @@ class AppLanguage extends ChangeNotifier {
     },
     'Kannada': {
       'checking_whos_here': 'ಯಾರು ಇಲ್ಲಿದ್ದಾರೆ ಎಂದು ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...',
-      'scanning_known_patient': 'ಗೊತ್ತಿದ ರೋಗಿಯನ್ನು ಸ್ಕ್ಯಾನ್ ಮಾಡಲಾಗುತ್ತಿದೆ...',
       'no_face_detected': 'ಮುಖ ಕಂಡುಬಂದಿಲ್ಲ',
       'no_matching_patient_found': 'ಹೊಂದಾಣಿಕೆಯ ರೋಗಿ ಕಂಡುಬಂದಿಲ್ಲ',
       'ready_to_scan': 'ಸ್ಕ್ಯಾನ್ ಮಾಡಲು ಸಿದ್ಧವಾಗಿದೆ',
@@ -268,7 +266,6 @@ class AppLanguage extends ChangeNotifier {
     },
     'Telugu': {
       'checking_whos_here': 'ఎవరు ఇక్కడ ఉన్నారు అని పరిశీలిస్తున్నాం...',
-      'scanning_known_patient': 'గుర్తించబడిన పేషెంట్ను స్కాన్ చేస్తున్నాం...',
       'no_face_detected': 'ముఖం కనబడలేదు',
       'no_matching_patient_found': 'పోలిక ఉన్న పేషెంట్ కనబడలేదు',
       'ready_to_scan': 'స్కాన్‌కి సిద్ధంగా ఉంది',
@@ -367,7 +364,6 @@ class AppLanguage extends ChangeNotifier {
     },
     'Tamil': {
       'checking_whos_here': 'இங்கு யார் இருக்கிறார்கள் என்று சரிபார்க்கிறோம்...',
-      'scanning_known_patient': 'அறியப்பட்ட நோயாளியை ஸ்கேன் செய்கிறோம்...',
       'no_face_detected': 'முகம் கண்டறியப்படவில்லை',
       'no_matching_patient_found': 'பொருந்தும் நோயாளர் இல்லை',
       'ready_to_scan': 'ஸ்கேன் செய்ய தயாராக உள்ளது',
@@ -466,7 +462,6 @@ class AppLanguage extends ChangeNotifier {
     },
     'Hindi': {
       'checking_whos_here': 'यहाँ कौन है देख रहे हैं...',
-      'scanning_known_patient': 'मालूम रोगी की पहचान की जा रही है...',
       'no_face_detected': 'चेहरा नहीं मिला',
       'no_matching_patient_found': 'मिलान करने वाला रोगी नहीं मिला',
       'ready_to_scan': 'स्कैन के लिए तैयार',

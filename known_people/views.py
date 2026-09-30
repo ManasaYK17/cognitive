@@ -1,4 +1,6 @@
+import mimetypes
 from django.contrib.contenttypes.models import ContentType
+from django.http import FileResponse
 from rest_framework import generics, permissions, status, views
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
@@ -64,6 +66,23 @@ class KnownPersonFaceImageView(generics.CreateAPIView):
 
     def get_queryset(self):
         return KnownPerson.objects.filter(patient__caregiver=self.request.user)
+
+    def get(self, request, *args, **kwargs):
+        known_person = self.get_queryset().filter(pk=kwargs['pk']).first()
+        if known_person is None:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, known_person)
+        content_type = ContentType.objects.get_for_model(KnownPerson)
+        face = FaceImage.objects.filter(
+            content_type=content_type,
+            object_id=known_person.id,
+        ).order_by('-created_at').first()
+        if face is None or not face.image:
+            return Response({'detail': 'No face image found.'}, status=status.HTTP_404_NOT_FOUND)
+        return FileResponse(
+            face.image.open('rb'),
+            content_type=mimetypes.guess_type(face.image.name)[0] or 'application/octet-stream',
+        )
 
     def post(self, request, *args, **kwargs):
         known_person = self.get_queryset().get(pk=kwargs['pk'])

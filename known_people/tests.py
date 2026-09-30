@@ -58,3 +58,11 @@ class KnownPersonTests(APITestCase):
         response = self.client.post(upload_url, {'files': [image, image]}, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(FaceImage.objects.filter(subject_type='known_person', object_id=known_person.id).count(), 2)
+
+        list_response = self.client.get(reverse('known-person-list-create'))
+        person_data = next(item for item in list_response.data if item['id'] == known_person.id)
+        self.assertIn(f'/api/known-people/{known_person.id}/face-images/', person_data['face_image'])
+
+        image_response = self.client.get(upload_url)
+        self.assertEqual(image_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(image_response['Content-Type'], 'image/jpeg')

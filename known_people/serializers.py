@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.urls import reverse
 from .models import KnownPerson
 from django.contrib.contenttypes.models import ContentType
 from patients.models import FaceImage
@@ -9,10 +10,9 @@ def _latest_face_image_url(obj, request=None):
     face = FaceImage.objects.filter(content_type=content_type, object_id=obj.id).order_by('-created_at').first()
     if not face:
         return None
-    try:
-        url = face.image.url
-    except Exception:
+    if not face.image:
         return None
+    url = reverse('known-person-face-images', kwargs={'pk': obj.id})
     if request is not None:
         return request.build_absolute_uri(url)
     return url

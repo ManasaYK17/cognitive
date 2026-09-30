@@ -53,6 +53,7 @@ class ConversationSummarizeView(views.APIView):
         known_person_id = request.data.get('known_person_id')
         target_language = request.data.get('language') or 'English'
         target_language = target_language.strip() or 'English'
+        captured_image = request.FILES.get('image')
 
         if not audio:
             return Response({'detail': 'An audio file is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -80,6 +81,7 @@ class ConversationSummarizeView(views.APIView):
             summary='',
             content_language=target_language,
             audio_file=audio,
+            captured_image=captured_image,
         )
         from cognitive_features.events import CONVERSATION_UPDATED, publish_patient_event
         publish_patient_event(patient, CONVERSATION_UPDATED, 'caregiver', conversation.id)

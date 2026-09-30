@@ -45,6 +45,7 @@ class ConversationSummarizeTests(APITestCase):
                 'known_person_id': self.known_person.id,
                 'device_id': self.device_id,
                 'language': 'Kannada',
+                'image': SimpleUploadedFile('capture.jpg', b'capture-bytes', content_type='image/jpeg'),
             },
             format='multipart',
         )
@@ -54,6 +55,7 @@ class ConversationSummarizeTests(APITestCase):
         conversation = ConversationHistory.objects.get(patient=self.patient, known_person=self.known_person)
         self.assertIn('brief summary', conversation.summary)
         self.assertEqual(conversation.content_language, 'Kannada')
+        self.assertTrue(conversation.captured_image.name.startswith('conversation_captures/'))
         self.assertEqual(mock_summarize.call_args.kwargs['target_language'], 'Kannada')
 
     @patch('conversations.views.summarize_transcript')

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:provider/provider.dart';
@@ -14,6 +15,7 @@ class PatientRecognitionResultScreen extends StatefulWidget {
   final String? knownPersonRelationship;
   final String sessionToken;
   final String? initialLastSummary;
+  final Uint8List? capturedImageBytes;
   final bool recordFromPhone;
 
   const PatientRecognitionResultScreen({
@@ -23,6 +25,7 @@ class PatientRecognitionResultScreen extends StatefulWidget {
     this.knownPersonRelationship,
     required this.sessionToken,
     this.initialLastSummary,
+    this.capturedImageBytes,
     this.recordFromPhone = true,
     super.key,
   });
@@ -34,10 +37,10 @@ class PatientRecognitionResultScreen extends StatefulWidget {
 class _PatientRecognitionResultScreenState extends State<PatientRecognitionResultScreen> {
   final ApiClient _api = ApiClient();
   final FlutterTts _flutterTts = FlutterTts();
-  bool _loading = true;
   bool _recording = false;
   bool _sending = false;
   bool _readyToStart = false;
+  bool _summaryLoaded = false;
   String? _lastSummary;
   String? _statusMessage;
   String? _errorMessage;
@@ -84,7 +87,6 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
         // recording the conversation itself -- the phone should only
         // surface the last summary here, not start a second recording.
         setState(() {
-          _loading = false;
           _readyToStart = false;
           _statusMessage = 'Your glasses are capturing this conversation.';
         });
@@ -92,7 +94,6 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _loading = false;
         _errorMessage = 'Unable to start conversation capture: $error';
         _statusMessage = '${appLanguage.translate('start_conversation')}';
       });
@@ -100,7 +101,10 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
   }
 
   Future<void> _fetchLastSummary() async {
-    if (_lastSummary != null) return;
+    if (_lastSummary != null) {
+      _summaryLoaded = true;
+      return;
+    }
     final response = await _api.get(
       '/history/patient-view/',
       token: widget.sessionToken,
@@ -119,6 +123,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
         _lastSummary = items.first['last_summary'] as String? ?? items.first['summary'] as String?;
       }
     }
+    _summaryLoaded = true;
   }
 
   Future<void> _speakSummary() async {
@@ -171,7 +176,6 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
     final appLanguage = Provider.of<AppLanguage>(context, listen: false);
     final audioService = Provider.of<AudioService>(context, listen: false);
     setState(() {
-      _loading = false;
       _errorMessage = null;
       _statusMessage = appLanguage.translate('starting_recording');
     });
@@ -217,6 +221,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
       widget.knownPersonId,
       widget.sessionToken,
       language: Provider.of<AppLanguage>(context, listen: false).language,
+      capturedImageBytes: widget.capturedImageBytes,
     );
     if (!mounted) return;
 
@@ -354,7 +359,7 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
                             ),
                             const SizedBox(height: 8),
                             Text(_lastSummary!, style: const TextStyle(fontSize: 15, color: Colors.white70)),
-                          ] else ...[
+                          ] else if (_summaryLoaded) ...[
                             Text(appLanguage.translate('no_previous_conversation_found'), style: const TextStyle(fontSize: 15, color: Colors.white70)),
                           ],
                         ],
@@ -367,10 +372,6 @@ class _PatientRecognitionResultScreenState extends State<PatientRecognitionResul
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       child: Text(_statusMessage!, style: const TextStyle(fontSize: 16), textAlign: TextAlign.center),
                     ),
-                  if (_loading) ...[
-                    const SizedBox(height: 20),
-                    const Center(child: CircularProgressIndicator()),
-                  ],
                   if (_recording) ...[
                     const SizedBox(height: 12),
                     Text('Capturing conversation...', style: Theme.of(context).textTheme.bodyLarge),

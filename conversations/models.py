@@ -12,6 +12,7 @@ class ConversationHistory(models.Model):
     localized_content = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True, null=True)
     audio_file = models.FileField(upload_to='conversation_audio/', blank=True, null=True)
+    captured_image = models.ImageField(upload_to='conversation_captures/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

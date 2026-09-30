@@ -59,7 +59,7 @@ def _read_bytes_from_file(image):
             try:
                 data = candidate.read()
             except Exception:
-                continue
+                data = None
             if data:
                 if hasattr(candidate, 'seek'):
                     try:
@@ -68,7 +68,10 @@ def _read_bytes_from_file(image):
                         pass
                 return data
         if hasattr(candidate, 'getvalue'):
-            data = candidate.getvalue()
+            try:
+                data = candidate.getvalue()
+            except Exception:
+                data = None
             if data:
                 return data
         if hasattr(candidate, 'readinto'):

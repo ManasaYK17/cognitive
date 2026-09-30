@@ -1,6 +1,7 @@
 from django.contrib.contenttypes.models import ContentType
+from django.core.files.storage import FileSystemStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -22,6 +23,8 @@ from .models import FaceEncoding
 from PIL import Image, ImageDraw
 import io
 import numpy as np
+from pathlib import Path
+import tempfile
 from unittest.mock import patch
 
 
@@ -331,6 +334,50 @@ class RecognitionEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('detail', response.data)
 
+    def test_specs_hardware_capture_does_not_fallback_to_known_person_when_no_face_is_found(self):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+        with patch('recognition.views.detect_face', side_effect=NoFaceDetectedError('No face detected')):
+            response = self.client.post(
+                reverse('identify-known-person'),
+                {'image': self._make_image(color=(255, 255, 0)), 'source': 'specs_hardware'},
+                format='multipart',
+            )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertEqual(response.data['name'], 'Unknown')
+
+    @patch('recognition.views.compute_similarity', return_value=0.2)
+    def test_specs_hardware_capture_is_saved_to_debug_captures(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+        uploaded_image = self._make_image()
+        expected_bytes = uploaded_image.read()
+        uploaded_image.seek(0)
+
+        with tempfile.TemporaryDirectory() as media_root:
+            storage = FileSystemStorage(location=media_root)
+            with patch('recognition.views.default_storage', storage):
+                response = self.client.post(
+                    reverse('identify-known-person'),
+                    {'image': uploaded_image, 'source': 'specs_hardware'},
+                    format='multipart',
+                )
+
+            capture_files = list((Path(media_root) / 'debug_captures').glob('*.jpg'))
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            self.assertEqual(len(capture_files), 1)
+            self.assertEqual(capture_files[0].read_bytes(), expected_bytes)
+            self.assertEqual(response.data['debug_capture'], f'debug_captures/{capture_files[0].name}')
+
     @patch('recognition.views.compute_similarity', return_value=0.84)
     def test_phone_auto_capture_accepts_realistic_same_person_similarity(self, _mock_similarity):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
@@ -344,7 +391,7 @@ class RecognitionEndpointTests(APITestCase):
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['id'], self.known_person.id)
 
-    @patch('recognition.views.compute_similarity', return_value=0.7)
+    @patch('recognition.views.compute_similarity', return_value=0.75)
     def test_phone_auto_capture_accepts_handset_known_person_score(self, _mock_similarity):
         token_response = self.client.post(
             reverse('issue-patient-session-token'),
@@ -361,6 +408,24 @@ class RecognitionEndpointTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['match'])
         self.assertEqual(response.data['id'], self.known_person.id)
+
+    @patch('recognition.views.compute_similarity', return_value=0.7)
+    def test_phone_auto_capture_rejects_borderline_score_as_unknown(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertEqual(response.data['name'], 'Unknown')
 
     @patch('recognition.views.compute_similarity', return_value=0.6)
     def test_phone_auto_capture_rejects_low_confidence_unknown_person(self, _mock_similarity):
@@ -408,22 +473,26 @@ class RecognitionEndpointTests(APITestCase):
     def test_phone_auto_capture_records_unknown_detection_event(self, _mock_similarity):
         identify_response = self.client.post(reverse('identify-patient'), {'device_id': self.device_id, 'image': self._make_image()}, format='multipart')
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {identify_response.data['patient_session_token']}")
+        captured_image = self._make_image()
+        captured_bytes = captured_image.read()
+        captured_image.seek(0)
 
         response = self.client.post(
             reverse('identify-known-person'),
-            {'image': self._make_image(), 'source': 'phone_auto_capture'},
+            {'image': captured_image, 'source': 'phone_auto_capture'},
             format='multipart',
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['match'])
-        self.assertTrue(
-            RecognitionHistory.objects.filter(
-                patient=self.patient,
-                subject_type='known_person',
-                outcome='not_matched',
-            ).exists(),
+        event = RecognitionHistory.objects.get(
+            patient=self.patient,
+            subject_type='known_person',
+            outcome='not_matched',
         )
+        self.assertTrue(event.captured_image.name.startswith('recognition_captures/'))
+        with event.captured_image.open('rb') as stored_image:
+            self.assertEqual(stored_image.read(), captured_bytes)
 
     @patch('recognition.views.compute_similarity', return_value=0.2)
     def test_unknown_person_uses_single_shared_unknown_identity(self, _mock_similarity):
@@ -454,6 +523,46 @@ class RecognitionEndpointTests(APITestCase):
         self.assertEqual(second.data['name'], 'Unknown')
         self.assertEqual(first.data['id'], second.data['id'])
         self.assertEqual(KnownPerson.objects.filter(patient=self.patient, name='Unknown').count(), 1)
+
+    @override_settings(RECOGNITION_HARDWARE_THRESHOLD=0.72, RECOGNITION_HARDWARE_MATCH_MARGIN=0.05)
+    @patch('recognition.views.compute_similarity', return_value=0.75)
+    def test_hardware_match_accepts_known_person_above_arcface_threshold(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'specs_hardware'},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['match'])
+        self.assertEqual(response.data['id'], self.known_person.id)
+
+    @override_settings(RECOGNITION_HARDWARE_THRESHOLD=0.72, RECOGNITION_HARDWARE_MATCH_MARGIN=0.05)
+    @patch('recognition.views.compute_similarity', return_value=0.70)
+    def test_hardware_rejects_unknown_below_arcface_threshold(self, _mock_similarity):
+        token_response = self.client.post(
+            reverse('issue-patient-session-token'),
+            {'patient_id': self.patient.id, 'device_id': self.device_id},
+            format='json',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token_response.data['patient_session_token']}")
+
+        response = self.client.post(
+            reverse('identify-known-person'),
+            {'image': self._make_image(), 'source': 'specs_hardware'},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['match'])
+        self.assertEqual(response.data['name'], 'Unknown')
 
     @patch('recognition.views.compute_similarity', return_value=0.84)
     def test_phone_auto_capture_detects_known_person(self, _mock_similarity):

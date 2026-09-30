@@ -135,8 +135,10 @@ RECOGNITION_MATCH_MARGIN = 0.1
 # Phone-camera captures score lower than enrollment images with the handset
 # fallback encoder. Keep a conservative floor and rely on the winner margin
 # to reject ambiguous candidates.
-RECOGNITION_PHONE_AUTO_THRESHOLD = 0.65
+RECOGNITION_PHONE_AUTO_THRESHOLD = 0.72
 RECOGNITION_PHONE_AUTO_MATCH_MARGIN = 0.15
+RECOGNITION_HARDWARE_THRESHOLD = 0.72
+RECOGNITION_HARDWARE_MATCH_MARGIN = 0.05
 OLLAMA_API_URL = os.environ.get('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
 OLLAMA_MODEL_NAME = os.environ.get('OLLAMA_MODEL_NAME', 'qwen2.5:7b')
 OPENROUTER_API_URL = os.environ.get('OPENROUTER_API_URL', 'https://openrouter.ai/api/v1/chat/completions')

@@ -93,7 +93,7 @@ class _FaceScanCameraState extends State<FaceScanCamera> with SingleTickerProvid
 
     final camera = cameras.firstWhere((item) => item.lensDirection == CameraLensDirection.front, orElse: () => cameras.first);
     debugPrint('[face_scan] using camera: ${camera.name} (${camera.lensDirection.name})');
-    _controller = CameraController(camera, ResolutionPreset.high, enableAudio: false);
+    _controller = CameraController(camera, ResolutionPreset.medium, enableAudio: false);
     await _controller!.initialize();
 
     _timeoutTimer = Timer(Duration(seconds: widget.timeoutSeconds), () {
